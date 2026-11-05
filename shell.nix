@@ -5,13 +5,22 @@ let
     fastapi
     uvicorn
     sqlmodel
+    pydantic-settings
+    httpx
   ]);
+
+  unstable = import (builtins.fetchTarball {
+  url = "https://github.com/NixOS/nixpkgs/archive/nixos-unstable.tar.gz";
+}) { };
 in
 pkgs.mkShell {
   packages = [
     python
     pkgs.fastapi-cli
     pkgs.uv
+    pkgs.sqlite
+    # Use postgresql_17 from unstable overlay
+    (unstable.postgresql_17)
   ];
 
   shellHook = ''
