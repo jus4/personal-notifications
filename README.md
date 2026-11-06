@@ -72,6 +72,42 @@ Health endpoints:
 - `GET /health`
 - `GET /health/db`
 
+## Deploy to Koyeb
+
+The repository includes a `Dockerfile` for a single Koyeb web service. The image
+does not contain a database or an `.env` file; configuration is provided by
+Koyeb.
+
+Koyeb service settings:
+
+- Builder: Dockerfile
+- Service type: Web
+- Exposed port: `8000`
+- Protocol: HTTP
+- Route: `/`
+- Health check: HTTP `GET /health`
+- Health check grace period: `30s`
+- Environment variables:
+  - `DATABASE_URL` as a Secret, using the external Postgres connection string
+  - `ENVIRONMENT=production`
+  - `SQL_ECHO=false`
+
+The container runs `alembic upgrade head` before starting Uvicorn, so migrations
+are applied automatically on each deployment. Keep the service at one instance;
+concurrent instances could race while applying migrations.
+
+Koyeb provides the `PORT` environment variable. The image uses it when present
+and otherwise falls back to `8000`.
+
+The same image can run as a Koyeb Worker service for scraping:
+
+```bash
+python -m app.cli scrape --kind jobs
+```
+
+Koyeb does not provide a built-in cron scheduler, so scheduling the scraper
+requires an external scheduler or an in-process scheduler.
+
 ## Manage sources
 
 Create or update a source by slug:
@@ -191,8 +227,7 @@ Source row
 2. Implement an adapter with a unique `key` and:
 
    ```python
-   async def fetch(self, source: Source) -> list[ScrapedJob]:
-       ...
+   async def fetch(self, source: Source) -> list[ScrapedJob]: ...
    ```
 
 3. Register it with `@register_job_adapter`.
