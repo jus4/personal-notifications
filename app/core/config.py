@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/app.db"
     environment: str = "development"
     sql_echo: bool = False
+    app_password: str = ""
+    session_secret: str = "dev-insecure-change-me"
+    session_cookie_name: str = "notification_session"
+    session_max_age: int = 60 * 60 * 24 * 30
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.lower() == "production"
 
     @property
     def normalized_database_url(self) -> str:
@@ -33,6 +41,11 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
+    if settings.is_production:
+        if not settings.app_password:
+            raise RuntimeError("APP_PASSWORD must be set in production")
+        if settings.session_secret == "dev-insecure-change-me":
+            raise RuntimeError("SESSION_SECRET must be changed in production")
     if settings.is_sqlite:
         database = make_url(settings.normalized_database_url).database
         if database and database != ":memory:":

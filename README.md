@@ -16,6 +16,7 @@ Python adapters, so adding a new source means adding an adapter module and a
 - JSON scraping via `httpx` with timeouts and retries.
 - CLI for managing sources and running scrapes.
 - Product scraper scaffold for future HTML scraping.
+- Password-protected login with a reusable API-key dependency.
 - SQLite by default, PostgreSQL supported through `DATABASE_URL`.
 
 ## Requirements
@@ -51,6 +52,13 @@ uv run alembic upgrade head
 | `DATABASE_URL` | `sqlite:///./data/app.db` | SQLAlchemy database URL |
 | `ENVIRONMENT` | `development` | Environment name |
 | `SQL_ECHO` | `false` | Log SQL statements when enabled |
+| `APP_PASSWORD` | empty | Login password; also used as the external API key |
+| `SESSION_SECRET` | `dev-insecure-change-me` | Secret used to sign session cookies |
+| `SESSION_COOKIE_NAME` | `notification_session` | Name of the session cookie |
+| `SESSION_MAX_AGE` | `2592000` | Session lifetime in seconds (30 days) |
+
+`APP_PASSWORD` is required when `ENVIRONMENT=production`, and `SESSION_SECRET`
+must be changed from its development default.
 
 Use `uv run` for all Python commands, or activate the project virtualenv first:
 
@@ -72,6 +80,35 @@ Health endpoints:
 - `GET /health`
 - `GET /health/db`
 
+## Authentication
+
+Open `/` to see the login page. Sign in with the value of `APP_PASSWORD`; on
+success the page shows a confirmation message and stores a signed session
+cookie. `/logout` clears the session.
+
+Future API routes can reuse the same password through the `require_api_key`
+dependency:
+
+```python
+from fastapi import Depends
+
+from app.core.security import require_api_key
+
+
+@app.get("/api/example", dependencies=[Depends(require_api_key)])
+def example() -> dict[str, str]:
+    return {"status": "ok"}
+```
+
+Clients authenticate by sending the password in the `X-API-Key` header:
+
+```bash
+curl -H "X-API-Key: $APP_PASSWORD" https://example.com/api/example
+```
+
+The health endpoints remain public. In production, session cookies are marked
+`Secure`, so the service must be served over HTTPS.
+
 ## Deploy to Koyeb
 
 The repository includes a `Dockerfile` for a single Koyeb web service. The image
@@ -91,6 +128,8 @@ Koyeb service settings:
   - `DATABASE_URL` as a Secret, using the external Postgres connection string
   - `ENVIRONMENT=production`
   - `SQL_ECHO=false`
+  - `APP_PASSWORD` as a Secret
+  - `SESSION_SECRET` as a Secret (a long random value)
 
 The container runs `alembic upgrade head` before starting Uvicorn, so migrations
 are applied automatically on each deployment. Keep the service at one instance;
@@ -245,18 +284,3 @@ list. It maps:
 The shared HTTP helper currently provides `fetch_json`. Future HTML sources
 should add a text/response fetch helper and use BeautifulSoup inside the source
 adapter.
-
-## Product scraping scaffold
-
-Product scraping is not implemented yet. The scaffold includes:
-
-- `ProductSourceAdapter` in `app/scrapers/base.py`.
-- `app/scrapers/products/` as the future home for product adapters.
-
-There is currently no product model, CLI command, or product adapter.
-
-## Limitations
-
-- Duunitori pagination is not implemented; only the first page is processed.
-- The API does not trigger scrapes directly.
-- Sources of kind `jobs` are the only supported kind so far.
