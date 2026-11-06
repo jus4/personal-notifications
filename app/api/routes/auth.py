@@ -1,14 +1,10 @@
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 
 from app.core.security import SESSION_AUTH_KEY, is_authenticated, verify_password
-
-TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+from app.core.templating import templates
 
 router = APIRouter(tags=["auth"])
 
@@ -21,11 +17,7 @@ def _is_htmx(request: Request) -> bool:
 def index(request: Request) -> Response:
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        {"message": "Login successful"},
-    )
+    return templates.TemplateResponse(request, "index.html")
 
 
 @router.get("/login", response_class=HTMLResponse)
