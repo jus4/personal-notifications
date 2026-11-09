@@ -19,22 +19,95 @@
       <div
         class="flex w-full items-center justify-between gap-4 px-4 py-3 sm:px-6"
       >
-        <p class="text-sm font-medium text-emerald-300">
-          Logged in successfully
-        </p>
-        <form action="/logout" method="post" hx-post="/logout">
-          <button
-            type="submit"
-            class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+        <div class="flex min-w-0 items-center gap-6">
+          <a
+            href="/"
+            class="truncate text-sm font-semibold tracking-tight text-white"
           >
-            Log out
-          </button>
-        </form>
+            Notification Service
+          </a>
+          <nav class="flex items-center gap-1 text-sm">
+            <a
+              href="/"
+              class="rounded-lg px-3 py-2 font-medium transition {% if request.url.path == '/' %}bg-slate-800 text-white{% else %}text-slate-400 hover:text-white{% endif %}"
+            >
+              Frontpage
+            </a>
+            <a
+              href="/jobs"
+              class="rounded-lg px-3 py-2 font-medium transition {% if request.url.path.startswith('/jobs') %}bg-slate-800 text-white{% else %}text-slate-400 hover:text-white{% endif %}"
+            >
+              Jobs
+            </a>
+          </nav>
+        </div>
+        <div class="flex items-center gap-4">
+          <p class="hidden text-sm font-medium text-emerald-300 sm:block">
+            Logged in successfully
+          </p>
+          <form action="/logout" method="post" hx-post="/logout">
+            <button
+              type="submit"
+              class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+            >
+              Log out
+            </button>
+          </form>
+        </div>
       </div>
     </header>
     {% endif %}
-    <main class="flex flex-1 items-center justify-center px-4 py-12">
+    <main
+      class="flex flex-1 {% block main_class %}items-center justify-center{% endblock %} px-4 py-8 sm:px-6"
+    >
       {% block content %}{% endblock %}
     </main>
+    <script>
+      (() => {
+        const datetimeFormatter = new Intl.DateTimeFormat(undefined, {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZoneName: "short",
+        });
+        const dateFormatter = new Intl.DateTimeFormat(undefined, {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
+
+        const formatTimes = () => {
+          document.querySelectorAll("time[data-local-time]").forEach((element) => {
+            const value = element.getAttribute("datetime");
+            if (!value) {
+              return;
+            }
+
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) {
+              return;
+            }
+
+            const formatter =
+              element.dataset.dateOnly === "true"
+                ? dateFormatter
+                : datetimeFormatter;
+            element.textContent = formatter.format(date);
+          });
+        };
+
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", formatTimes);
+        } else {
+          formatTimes();
+        }
+
+        document.body.addEventListener("htmx:afterSwap", formatTimes);
+        document.body.addEventListener("htmx:oobAfterSwap", formatTimes);
+        document.body.addEventListener("htmx:historyRestore", formatTimes);
+      })();
+    </script>
   </body>
 </html>

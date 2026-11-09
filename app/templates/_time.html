@@ -1,0 +1,17 @@
+{% macro local_time(value, date_only=false) -%}
+  {%- if value -%}
+    <time
+      datetime="{{ value | utc_isoformat }}"
+      data-local-time
+      {%- if date_only %} data-date-only="true"{% endif %}
+    >
+      {%- if date_only -%}
+        {{ value | local_date }}
+      {%- else -%}
+        {{ value | local_datetime }}
+      {%- endif -%}
+    </time>
+  {%- else -%}
+    —
+  {%- endif -%}
+{%- endmacro %}

@@ -1,0 +1,63 @@
+<div class="rounded-2xl border border-slate-800 bg-slate-900">
+  <div class="flex flex-col gap-2 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      <h2 class="text-sm font-semibold text-slate-200">Scrape results</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Ran {{ scrape_source_count }} enabled source{% if scrape_source_count != 1 %}s{% endif %}.
+      </p>
+    </div>
+  </div>
+
+  {% if scrape_results or scrape_failures %}
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
+      <thead class="bg-slate-950/60 text-xs uppercase tracking-wide text-slate-500">
+        <tr>
+          <th scope="col" class="px-5 py-3 font-medium">Source</th>
+          <th scope="col" class="px-5 py-3 font-medium">Fetched</th>
+          <th scope="col" class="px-5 py-3 font-medium">Inserted</th>
+          <th scope="col" class="px-5 py-3 font-medium">Updated</th>
+          <th scope="col" class="px-5 py-3 font-medium">Skipped</th>
+          <th scope="col" class="px-5 py-3 font-medium">Failed</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-800/70">
+        {% for result in scrape_results %}
+        <tr>
+          <td class="px-5 py-3 font-medium text-slate-200">
+            {{ result.source }}
+          </td>
+          <td class="px-5 py-3 text-slate-300">{{ result.fetched }}</td>
+          <td class="px-5 py-3 text-emerald-300">{{ result.inserted }}</td>
+          <td class="px-5 py-3 text-sky-300">{{ result.updated }}</td>
+          <td class="px-5 py-3 text-slate-400">{{ result.skipped }}</td>
+          <td class="px-5 py-3 text-slate-400">{{ result.failed }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="px-5 py-8 text-sm text-slate-400">
+    {% if scrape_source_count %}
+      The scrape completed without per-source results.
+    {% else %}
+      No enabled jobs sources to scrape.
+    {% endif %}
+  </p>
+  {% endif %}
+
+  {% if scrape_failures %}
+  <div class="border-t border-slate-800 px-5 py-4">
+    <h3 class="text-sm font-semibold text-red-300">Errors</h3>
+    <ul class="mt-3 space-y-2">
+      {% for failure in scrape_failures %}
+      <li class="rounded-lg border border-red-900 bg-red-950/60 px-3 py-2 text-sm text-red-200">
+        <span class="font-medium">{{ failure.source }}</span>:
+        {{ failure.error }}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>

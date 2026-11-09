@@ -1,11 +1,14 @@
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.models.source import Source
 from app.scrapers.base import JobSourceAdapter
 from app.scrapers.registry import JOB_ADAPTERS
 from app.services.jobs import JobRepository
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -16,6 +19,19 @@ class ScrapeResult:
     updated: int = 0
     skipped: int = 0
     failed: int = 0
+
+
+@dataclass(slots=True)
+class ScrapeFailure:
+    source: str
+    error: str
+
+
+@dataclass(slots=True)
+class ScrapeBatchResult:
+    results: list[ScrapeResult] = field(default_factory=list)
+    failures: list[ScrapeFailure] = field(default_factory=list)
+    source_count: int = 0
 
 
 async def run_source(session: Session, source: Source) -> ScrapeResult:
@@ -37,3 +53,28 @@ async def run_source(session: Session, source: Source) -> ScrapeResult:
         skipped=upsert.skipped,
         failed=upsert.failed,
     )
+
+
+async def run_enabled_sources(
+    session: Session,
+    kind: str = "jobs",
+) -> ScrapeBatchResult:
+    sources = list(
+        session.exec(
+            select(Source)
+            .where(Source.enabled.is_(True), Source.kind == kind)
+            .order_by(Source.slug)
+        ).all()
+    )
+
+    batch = ScrapeBatchResult(source_count=len(sources))
+    for source in sources:
+        slug = source.slug
+        try:
+            batch.results.append(await run_source(session, source))
+        except Exception as exc:
+            session.rollback()
+            logger.exception("Scrape failed for %s", slug)
+            batch.failures.append(ScrapeFailure(source=slug, error=str(exc)))
+
+    return batch

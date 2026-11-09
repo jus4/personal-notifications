@@ -17,6 +17,8 @@ Python adapters, so adding a new source means adding an adapter module and a
 - CLI for managing sources and running scrapes.
 - Product scraper scaffold for future HTML scraping.
 - Password-protected login with a reusable API-key dependency.
+- Frontpage dashboard with job/source stats and an on-demand scrape action.
+- Filterable jobs listing with title, source, link, posted, and scraped dates.
 - SQLite by default, PostgreSQL supported through `DATABASE_URL`.
 
 ## Requirements
@@ -79,6 +81,24 @@ Health endpoints:
 
 - `GET /health`
 - `GET /health/db`
+
+## Web UI
+
+After signing in, the navigation links to:
+
+- `/` — frontpage with total jobs, source counts, last scrape time, an
+  enabled/disabled source breakdown, and a **Scrape jobs** button.
+- `/jobs` — paginated job listing with title, source, link, date posted, and
+  date scraped. Filters cover title search, source, and posted-date range.
+
+The **Scrape jobs** button runs all enabled `jobs` sources synchronously and
+shows per-source fetched/inserted/updated/skipped/failed counts, plus any source
+errors. The job link and posted date are read from each job's `raw_data`
+(`link`, `date_posted` with a `date_created` fallback), so no extra database
+columns are required.
+
+Displayed timestamps are converted to the browser's local timezone. Without
+JavaScript they fall back to `Europe/Helsinki` (EET/EEST).
 
 ## Authentication
 

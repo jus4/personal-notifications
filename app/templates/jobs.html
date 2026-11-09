@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}Jobs · Notification Service{% endblock %}
+
+{% block main_class %}items-start justify-center{% endblock %}
+
+{% block content %}
+<div class="w-full max-w-6xl space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">Jobs</h1>
+    <p class="mt-2 text-sm text-slate-400">
+      Scraped job postings with their source and posting dates.
+    </p>
+  </div>
+
+  <form
+    action="/jobs"
+    method="get"
+    hx-get="/jobs"
+    hx-target="#jobs-results"
+    hx-push-url="true"
+    hx-trigger="submit, change"
+    class="rounded-2xl border border-slate-800 bg-slate-900 p-4 sm:p-5"
+  >
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div class="lg:col-span-2">
+        <label for="q" class="block text-sm font-medium text-slate-300">
+          Title
+        </label>
+        <input
+          id="q"
+          name="q"
+          type="search"
+          value="{{ filters.q or '' }}"
+          placeholder="Search by title"
+          class="mt-2 block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+        />
+      </div>
+      <div>
+        <label for="source" class="block text-sm font-medium text-slate-300">
+          Source
+        </label>
+        <select
+          id="source"
+          name="source"
+          class="mt-2 block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+        >
+          <option value="">All sources</option>
+          {% for source in sources %}
+          <option value="{{ source }}" {% if filters.source == source %}selected{% endif %}>
+            {{ source }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="posted_from" class="block text-sm font-medium text-slate-300">
+          Posted from
+        </label>
+        <input
+          id="posted_from"
+          name="posted_from"
+          type="date"
+          value="{{ filters.posted_from.isoformat() if filters.posted_from else '' }}"
+          class="mt-2 block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+        />
+      </div>
+      <div>
+        <label for="posted_to" class="block text-sm font-medium text-slate-300">
+          Posted to
+        </label>
+        <input
+          id="posted_to"
+          name="posted_to"
+          type="date"
+          value="{{ filters.posted_to.isoformat() if filters.posted_to else '' }}"
+          class="mt-2 block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+        />
+      </div>
+    </div>
+    <div class="mt-4 flex flex-wrap items-center gap-3">
+      <button
+        type="submit"
+        class="rounded-lg bg-sky-600 px-4 py-2 font-medium text-white transition hover:bg-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+      >
+        Apply filters
+      </button>
+      <a
+        href="/jobs"
+        hx-get="/jobs"
+        hx-target="#jobs-results"
+        hx-push-url="true"
+        class="rounded-lg border border-slate-700 px-4 py-2 font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
+      >
+        Clear
+      </a>
+    </div>
+  </form>
+
+  <div id="jobs-results">
+    {% include "_jobs_table.html" %}
+  </div>
+</div>
+{% endblock %}
