@@ -7,8 +7,19 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.models
+from app.core.config import get_settings
 from app.db.session import get_session
 from app.main import app
+
+PASSWORD = "test-password"
+
+
+@pytest.fixture
+def app_password(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "app_password", PASSWORD)
+    yield
+    monkeypatch.setattr(settings, "app_password", "")
 
 
 @pytest.fixture
@@ -40,3 +51,17 @@ def client(engine: Engine) -> Generator[TestClient, None, None]:
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def authenticated_client(
+    client: TestClient,
+    app_password: None,
+) -> TestClient:
+    response = client.post(
+        "/login",
+        data={"password": PASSWORD},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    return client

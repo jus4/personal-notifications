@@ -1,5 +1,39 @@
 {% extends "base.html" %}
 
-{% block title %}Notification Service{% endblock %}
+{% block title %}Frontpage · Notification Service{% endblock %}
 
-{% block content %}{% endblock %}
+{% block main_class %}items-start justify-center{% endblock %}
+
+{% block content %}
+<div class="w-full max-w-6xl space-y-8">
+  <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Frontpage</h1>
+      <p class="mt-2 text-sm text-slate-400">
+        Overview of scraped jobs and the latest source activity.
+      </p>
+    </div>
+    <form
+      action="/scrape"
+      method="post"
+      hx-post="/scrape"
+      hx-target="#dashboard-content"
+      hx-swap="innerHTML"
+      hx-indicator="#scrape-button"
+      hx-disabled-elt="#scrape-button"
+    >
+      <button
+        id="scrape-button"
+        type="submit"
+        class="rounded-lg bg-sky-600 px-4 py-2 font-medium text-white transition hover:bg-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50 disabled:cursor-wait disabled:opacity-60"
+      >
+        Scrape jobs
+      </button>
+    </form>
+  </div>
+
+  <div id="dashboard-content" class="space-y-8">
+    {% include "_dashboard_content.html" %}
+  </div>
+</div>
+{% endblock %}

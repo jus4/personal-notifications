@@ -1,0 +1,110 @@
+{% from "_time.html" import local_time %}
+
+<div class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
+  <div class="flex flex-col gap-1 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+    <p class="text-sm font-medium text-slate-200">
+      {{ page_result.total }} job{% if page_result.total != 1 %}s{% endif %}
+    </p>
+    {% if page_result.pages %}
+    <p class="text-xs text-slate-500">
+      Page {{ page_result.page }} of {{ page_result.pages }}
+    </p>
+    {% endif %}
+  </div>
+
+  {% if page_result.jobs %}
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
+      <thead class="bg-slate-950/60 text-xs uppercase tracking-wide text-slate-500">
+        <tr>
+          <th scope="col" class="px-5 py-3 font-medium">Title</th>
+          <th scope="col" class="px-5 py-3 font-medium">Source</th>
+          <th scope="col" class="px-5 py-3 font-medium">Link</th>
+          <th scope="col" class="px-5 py-3 font-medium">Date posted</th>
+          <th scope="col" class="px-5 py-3 font-medium">Date scraped</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-800/70">
+        {% for job in page_result.jobs %}
+        <tr class="align-top">
+          <td class="max-w-md px-5 py-3 font-medium text-slate-200">
+            {% if job.url %}
+            <a
+              href="{{ job.url }}"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="transition hover:text-sky-300"
+            >
+              {{ job.title }}
+            </a>
+            {% else %}
+              {{ job.title }}
+            {% endif %}
+          </td>
+          <td class="whitespace-nowrap px-5 py-3 text-slate-400">
+            {{ job.source }}
+          </td>
+          <td class="whitespace-nowrap px-5 py-3">
+            {% if job.url %}
+            <a
+              href="{{ job.url }}"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-sky-400 transition hover:text-sky-300"
+            >
+              Open ↗
+            </a>
+            {% else %}
+            <span class="text-slate-600">—</span>
+            {% endif %}
+          </td>
+          <td class="whitespace-nowrap px-5 py-3 text-slate-400">
+            {{ local_time(job.posted_at, date_only=true) }}
+          </td>
+          <td class="whitespace-nowrap px-5 py-3 text-slate-400">
+            {{ local_time(job.scraped_at, date_only=true) }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if page_result.has_previous or page_result.has_next %}
+  <div class="flex items-center justify-between gap-4 border-t border-slate-800 px-5 py-4">
+    {% if page_result.has_previous %}
+    {% set previous_url = request.url.include_query_params(page=page_result.previous_page) %}
+    <a
+      href="{{ previous_url }}"
+      hx-get="{{ previous_url }}"
+      hx-target="#jobs-results"
+      hx-push-url="true"
+      class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
+    >
+      Previous
+    </a>
+    {% else %}
+    <span></span>
+    {% endif %}
+
+    {% if page_result.has_next %}
+    {% set next_url = request.url.include_query_params(page=page_result.next_page) %}
+    <a
+      href="{{ next_url }}"
+      hx-get="{{ next_url }}"
+      hx-target="#jobs-results"
+      hx-push-url="true"
+      class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
+    >
+      Next
+    </a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% else %}
+  <p class="px-5 py-10 text-sm text-slate-400">
+    No jobs match the current filters.
+  </p>
+  {% endif %}
+</div>

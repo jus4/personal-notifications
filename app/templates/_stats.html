@@ -1,0 +1,77 @@
+{% from "_time.html" import local_time %}
+
+<div class="grid gap-4 sm:grid-cols-3">
+  <div class="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+    <p class="text-sm font-medium text-slate-400">Total jobs</p>
+    <p class="mt-2 text-3xl font-semibold tracking-tight">
+      {{ stats.total_jobs }}
+    </p>
+  </div>
+  <div class="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+    <p class="text-sm font-medium text-slate-400">Sources</p>
+    <p class="mt-2 text-3xl font-semibold tracking-tight">
+      {{ stats.total_sources }}
+    </p>
+    <p class="mt-1 text-xs text-slate-500">
+      {{ stats.enabled_sources }} enabled
+    </p>
+  </div>
+  <div class="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+    <p class="text-sm font-medium text-slate-400">Last scrape</p>
+    <p class="mt-2 text-lg font-semibold tracking-tight text-slate-100">
+      {% if stats.last_scraped_at %}
+        {{ local_time(stats.last_scraped_at) }}
+      {% else %}
+        Never
+      {% endif %}
+    </p>
+  </div>
+</div>
+
+<div class="mt-6 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
+  <div class="border-b border-slate-800 px-5 py-4">
+    <h2 class="text-sm font-semibold text-slate-200">Sources</h2>
+  </div>
+  {% if stats.sources %}
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
+      <thead class="bg-slate-950/60 text-xs uppercase tracking-wide text-slate-500">
+        <tr>
+          <th scope="col" class="px-5 py-3 font-medium">Source</th>
+          <th scope="col" class="px-5 py-3 font-medium">Status</th>
+          <th scope="col" class="px-5 py-3 font-medium">Jobs</th>
+          <th scope="col" class="px-5 py-3 font-medium">Last scraped</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-800/70">
+        {% for source in stats.sources %}
+        <tr>
+          <td class="px-5 py-3 font-medium text-slate-200">
+            {{ source.source }}
+          </td>
+          <td class="px-5 py-3">
+            <span
+              class="inline-flex rounded-full px-2.5 py-1 text-xs font-medium {% if source.enabled %}bg-emerald-950 text-emerald-300{% else %}bg-slate-800 text-slate-400{% endif %}"
+            >
+              {% if source.enabled %}Enabled{% else %}Disabled{% endif %}
+            </span>
+          </td>
+          <td class="px-5 py-3 text-slate-300">{{ source.jobs }}</td>
+          <td class="px-5 py-3 text-slate-400">
+            {% if source.last_scraped_at %}
+              {{ local_time(source.last_scraped_at) }}
+            {% else %}
+              Never
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="px-5 py-8 text-sm text-slate-400">
+    No sources configured yet.
+  </p>
+  {% endif %}
+</div>
