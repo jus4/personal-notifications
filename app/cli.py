@@ -3,7 +3,7 @@ import asyncio
 import logging
 from collections.abc import Sequence
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.db.session import engine
 from app.models.common import utcnow
@@ -93,15 +93,15 @@ def _list_sources(args: argparse.Namespace) -> int:
 
 async def _scrape(args: argparse.Namespace) -> int:
     with Session(engine) as session:
-        statement = select(Source).where(Source.enabled.is_(True))
+        statement = select(Source).where(col(Source.enabled).is_(True))
         if args.source_slug:
-            statement = statement.where(Source.slug == args.source_slug)
+            statement = statement.where(col(Source.slug) == args.source_slug)
         else:
-            statement = statement.where(Source.kind == args.kind)
+            statement = statement.where(col(Source.kind) == args.kind)
 
         source_ids = [
             source.id
-            for source in session.exec(statement.order_by(Source.slug)).all()
+            for source in session.exec(statement.order_by(col(Source.slug))).all()
             if source.id is not None
         ]
 

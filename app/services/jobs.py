@@ -1,12 +1,15 @@
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from typing import Any
 
-from sqlalchemy import DateTime, cast, desc, func
-from sqlmodel import Session, select
+from sqlalchemy import DateTime, and_, cast, desc, func, or_
+from sqlalchemy.orm import aliased
+from sqlmodel import Session, col, select
 
 from app.models.common import utcnow
 from app.models.job import Job
 from app.models.source import Source
+from app.models.user_job_delivery import UserJobDelivery
 from app.scrapers.base import ScrapedJob
 
 
@@ -73,26 +76,15 @@ class JobRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def _dialect_name(self) -> str:
-        bind = self.session.get_bind()
-        return bind.dialect.name if bind is not None else ""
-
     def _posted_date_expr(self):
-        if self._dialect_name() in {"postgres", "postgresql"}:
-            return func.coalesce(
-                Job.raw_data.op("->>")("date_posted"),
-                Job.raw_data.op("->>")("date_created"),
-            )
+        raw_data = col(Job.raw_data)
         return func.coalesce(
-            func.json_extract(Job.raw_data, "$.date_posted"),
-            func.json_extract(Job.raw_data, "$.date_created"),
+            raw_data.op("->>")("date_posted"),
+            raw_data.op("->>")("date_created"),
         )
 
     def _posted_date_sort_expr(self):
-        posted = self._posted_date_expr()
-        if self._dialect_name() in {"postgres", "postgresql"}:
-            return cast(posted, DateTime(timezone=True))
-        return func.julianday(posted)
+        return cast(self._posted_date_expr(), DateTime(timezone=True))
 
     def list_jobs(
         self,
@@ -103,9 +95,9 @@ class JobRepository:
     ) -> JobPage:
         conditions = []
         if filters.q:
-            conditions.append(Job.title.ilike(f"%{filters.q}%"))
+            conditions.append(col(Job.title).ilike(f"%{filters.q}%"))
         if filters.source:
-            conditions.append(Job.source == filters.source)
+            conditions.append(col(Job.source) == filters.source)
         if filters.posted_from or filters.posted_to:
             posted_date = func.substr(self._posted_date_expr(), 1, 10)
             if filters.posted_from:
@@ -113,7 +105,7 @@ class JobRepository:
             if filters.posted_to:
                 conditions.append(posted_date <= filters.posted_to.isoformat())
 
-        count_statement = select(func.count(Job.id))
+        count_statement = select(func.count(col(Job.id)))
         for condition in conditions:
             count_statement = count_statement.where(condition)
         total = self.session.exec(count_statement).one()
@@ -127,8 +119,8 @@ class JobRepository:
         statement = (
             statement.order_by(
                 desc(self._posted_date_sort_expr()).nulls_last(),
-                Job.scraped_at.desc(),
-                Job.id.desc(),
+                col(Job.scraped_at).desc(),
+                col(Job.id).desc(),
             )
             .offset((page - 1) * per_page)
             .limit(per_page)
@@ -143,17 +135,107 @@ class JobRepository:
         )
 
     def list_sources(self) -> list[str]:
-        statement = select(Job.source).distinct().order_by(Job.source)
+        statement = select(col(Job.source)).distinct().order_by(col(Job.source))
         return list(self.session.exec(statement).all())
 
+    def list_unread_jobs_for_user(
+        self,
+        user_id: int,
+        *,
+        resend_after_seconds: int = 1800,
+    ) -> list[Job]:
+        delivery = aliased(UserJobDelivery)
+        cutoff = utcnow() - timedelta(seconds=resend_after_seconds)
+
+        statement = (
+            select(Job)
+            .outerjoin(
+                delivery,
+                and_(
+                    col(delivery.job_id) == col(Job.id),
+                    col(delivery.user_id) == user_id,
+                ),
+            )
+            .where(
+                or_(
+                    col(delivery.id).is_(None),
+                    and_(
+                        col(delivery.shown_at).is_(None),
+                        or_(
+                            col(delivery.sent_at).is_(None),
+                            col(delivery.sent_at) < cutoff,
+                        ),
+                    ),
+                )
+            )
+            .order_by(
+                desc(self._posted_date_sort_expr()).nulls_last(),
+                col(Job.scraped_at).desc(),
+                col(Job.id).desc(),
+            )
+        )
+        return list(self.session.exec(statement).all())
+
+    def mark_jobs_sent(self, user_id: int, job_ids: list[int]) -> None:
+        if not job_ids:
+            return
+
+        now = utcnow()
+        existing = self._deliveries_for(user_id, job_ids)
+        for job_id in job_ids:
+            delivery = existing.get(job_id)
+            if delivery is None:
+                self.session.add(
+                    UserJobDelivery(user_id=user_id, job_id=job_id, sent_at=now)
+                )
+                continue
+            delivery.sent_at = now
+            self.session.add(delivery)
+
+    def mark_jobs_shown(self, user_id: int, job_ids: list[int]) -> None:
+        if not job_ids:
+            return
+
+        now = utcnow()
+        existing = self._deliveries_for(user_id, job_ids)
+        for job_id in job_ids:
+            delivery = existing.get(job_id)
+            if delivery is None:
+                self.session.add(
+                    UserJobDelivery(
+                        user_id=user_id,
+                        job_id=job_id,
+                        sent_at=now,
+                        shown_at=now,
+                    )
+                )
+                continue
+            delivery.shown_at = now
+            self.session.add(delivery)
+
+    def _deliveries_for(
+        self, user_id: int, job_ids: list[int]
+    ) -> dict[int, UserJobDelivery]:
+        return {
+            delivery.job_id: delivery
+            for delivery in self.session.exec(
+                select(UserJobDelivery).where(
+                    col(UserJobDelivery.user_id) == user_id,
+                    col(UserJobDelivery.job_id).in_(job_ids),
+                )
+            ).all()
+        }
+
     def dashboard_stats(self) -> DashboardStats:
-        sources = list(self.session.exec(select(Source).order_by(Source.slug)).all())
+        sources = list(
+            self.session.exec(select(Source).order_by(col(Source.slug))).all()
+        )
         rows = self.session.exec(
             select(
-                Job.source,
-                func.count(Job.id),
-                func.max(Job.scraped_at),
-            ).group_by(Job.source)
+                col(Job.source),
+                func.count(col(Job.id)),
+                func.max(col(Job.scraped_at)),
+            ).group_by(col(Job.source))
         ).all()
         by_source = {
             source: (jobs, last_scraped) for source, jobs, last_scraped in rows
@@ -214,8 +296,8 @@ class JobRepository:
             job.external_id: job
             for job in self.session.exec(
                 select(Job).where(
-                    Job.source == source,
-                    Job.external_id.in_(list(unique_jobs)),
+                    col(Job.source) == source,
+                    col(Job.external_id).in_(list(unique_jobs)),
                 )
             ).all()
         }
@@ -249,3 +331,14 @@ class JobRepository:
             raise
 
         return result
+
+
+def serialize_job(job: Job) -> dict[str, Any]:
+    return {
+        "id": job.id,
+        "title": job.title,
+        "url": job.url,
+        "source": job.source,
+        "posted_at": job.posted_at.isoformat() if job.posted_at else None,
+        "scraped_at": job.scraped_at.isoformat(),
+    }

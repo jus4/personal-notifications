@@ -18,7 +18,6 @@ pkgs.mkShell {
     python
     pkgs.fastapi-cli
     pkgs.uv
-    pkgs.sqlite
     # Use postgresql_17 from unstable overlay
     (unstable.postgresql_17)
   ];
