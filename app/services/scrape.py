@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass, field
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.models.source import Source
 from app.scrapers.base import JobSourceAdapter
@@ -62,7 +62,7 @@ async def run_enabled_sources(
     sources = list(
         session.exec(
             select(Source)
-            .where(Source.enabled.is_(True), Source.kind == kind)
+            .where(col(Source.enabled).is_(True), col(Source.kind) == kind)
             .order_by(Source.slug)
         ).all()
     )

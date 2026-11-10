@@ -1,4 +1,4 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from typing import Annotated
 
 from fastapi import Depends
@@ -8,12 +8,9 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-connect_args = {"check_same_thread": False} if settings.is_sqlite else {}
-
 engine = create_engine(
     settings.normalized_database_url,
     echo=settings.sql_echo,
-    connect_args=connect_args,
 )
 
 
@@ -23,3 +20,12 @@ def get_session() -> Generator[Session, None, None]:
 
 
 SessionDep = Annotated[Session, Depends(get_session)]
+
+SessionFactory = Callable[[], Session]
+
+
+def get_session_factory() -> SessionFactory:
+    return lambda: Session(engine)
+
+
+SessionFactoryDep = Annotated[SessionFactory, Depends(get_session_factory)]

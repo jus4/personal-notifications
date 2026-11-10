@@ -1,8 +1,6 @@
 from functools import lru_cache
-from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
@@ -12,13 +10,17 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = "sqlite:///./data/app.db"
+    database_url: str
+    test_database_url: str | None = None
     environment: str = "development"
     sql_echo: bool = False
     app_password: str = ""
     session_secret: str = "dev-insecure-change-me"
     session_cookie_name: str = "notification_session"
     session_max_age: int = 60 * 60 * 24 * 30
+    scrape_interval_seconds: int = 60 * 30
+    websocket_job_limit: int = 10
+    job_reshow_after_seconds: int = 60 * 30
 
     @property
     def is_production(self) -> bool:
@@ -33,21 +35,13 @@ class Settings(BaseSettings):
             return url.replace("postgresql://", "postgresql+psycopg://", 1)
         return url
 
-    @property
-    def is_sqlite(self) -> bool:
-        return self.normalized_database_url.startswith("sqlite")
-
 
 @lru_cache
 def get_settings() -> Settings:
-    settings = Settings()
+    settings = Settings.model_validate({})
     if settings.is_production:
         if not settings.app_password:
             raise RuntimeError("APP_PASSWORD must be set in production")
         if settings.session_secret == "dev-insecure-change-me":
             raise RuntimeError("SESSION_SECRET must be changed in production")
-    if settings.is_sqlite:
-        database = make_url(settings.normalized_database_url).database
-        if database and database != ":memory:":
-            Path(database).parent.mkdir(parents=True, exist_ok=True)
     return settings

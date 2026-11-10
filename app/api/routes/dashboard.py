@@ -6,7 +6,7 @@ from app.core.security import is_authenticated
 from app.core.templating import templates
 from app.db.session import SessionDep
 from app.services.jobs import JobRepository
-from app.services.scrape import run_enabled_sources
+from app.services.notification_scheduler import scrape_and_notify, scrape_lock
 
 router = APIRouter(tags=["dashboard"])
 
@@ -29,7 +29,9 @@ async def scrape(request: Request, session: SessionDep) -> Response:
     if not is_authenticated(request):
         return _login_redirect()
 
-    batch = await run_enabled_sources(session)
+    async with scrape_lock:
+        batch = await scrape_and_notify(session)
+
     stats = JobRepository(session).dashboard_stats()
     context = {
         "stats": stats,
