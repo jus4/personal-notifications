@@ -8,9 +8,9 @@ import pytest
 from app.scrapers import http
 
 
-class FakeAsyncClient:
+class FakeHttpxClient:
     response_factory: Any = None
-    instances: ClassVar[list["FakeAsyncClient"]] = []
+    instances: ClassVar[list["FakeHttpxClient"]] = []
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
@@ -28,56 +28,149 @@ class FakeAsyncClient:
         return self.__class__.response_factory(self.calls, url)
 
 
-def _response(url: str, status: int, **kwargs: Any) -> httpx.Response:
-    return httpx.Response(
-        status,
-        request=httpx.Request("GET", url),
-        **kwargs,
-    )
+class FakeAsyncSession:
+    response_factory: Any = None
+    instances: ClassVar[list["FakeAsyncSession"]] = []
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+        self.calls = 0
+        self.__class__.instances.append(self)
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> bool:
+        return False
+
+    async def get(self, url: str) -> Any:
+        self.calls += 1
+        return self.__class__.response_factory(self.calls, url)
+
+
+class FakeResponse:
+    def __init__(
+        self,
+        status_code: int,
+        *,
+        text: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self.text = text
+        self.headers = headers or {}
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+def _httpx_response(url: str, status: int, **kwargs: Any) -> httpx.Response:
+    return httpx.Response(status, request=httpx.Request("GET", url), **kwargs)
 
 
 @pytest.fixture
-def fake_client(monkeypatch: pytest.MonkeyPatch) -> type[FakeAsyncClient]:
-    FakeAsyncClient.instances.clear()
-    FakeAsyncClient.response_factory = None
-    monkeypatch.setattr(http.httpx, "AsyncClient", FakeAsyncClient)
-
+def settings(monkeypatch: pytest.MonkeyPatch) -> Any:
     class SettingsStub:
         scraper_user_agent = "test-agent"
+        scraper_impersonate = "chrome"
         scraper_proxy_url = None
 
-    monkeypatch.setattr(http, "get_settings", lambda: SettingsStub())
-    return FakeAsyncClient
+    stub = SettingsStub()
+    monkeypatch.setattr(http, "get_settings", lambda: stub)
+    return stub
+
+
+@pytest.fixture
+def fake_html_session(
+    monkeypatch: pytest.MonkeyPatch,
+    settings: Any,
+) -> type[FakeAsyncSession]:
+    FakeAsyncSession.instances.clear()
+    FakeAsyncSession.response_factory = None
+    monkeypatch.setattr(http, "AsyncSession", FakeAsyncSession)
+    return FakeAsyncSession
+
+
+@pytest.fixture
+def fake_httpx(
+    monkeypatch: pytest.MonkeyPatch,
+    settings: Any,
+) -> type[FakeHttpxClient]:
+    FakeHttpxClient.instances.clear()
+    FakeHttpxClient.response_factory = None
+    monkeypatch.setattr(http.httpx, "AsyncClient", FakeHttpxClient)
+    return FakeHttpxClient
+
+
+def test_fetch_json_sends_configured_user_agent(
+    fake_httpx: type[FakeHttpxClient],
+) -> None:
+    url = "https://example.test/jobs"
+    fake_httpx.response_factory = lambda call, requested: _httpx_response(
+        requested, 200, json={"results": []}
+    )
+
+    assert asyncio.run(http.fetch_json(url)) == {"results": []}
+    assert fake_httpx.instances[0].kwargs["headers"]["User-Agent"] == "test-agent"
+
+
+def test_fetch_text_configures_impersonation_and_proxy(
+    fake_html_session: type[FakeAsyncSession],
+    settings: Any,
+) -> None:
+    settings.scraper_proxy_url = "http://proxy.test:8080"
+    url = "https://example.test/jobs"
+    fake_html_session.response_factory = lambda call, requested: FakeResponse(
+        200, text="ok"
+    )
+
+    assert asyncio.run(http.fetch_text(url)) == "ok"
+
+    session = fake_html_session.instances[0]
+    assert session.kwargs["impersonate"] == "chrome"
+    assert session.kwargs["proxies"] == {
+        "http": "http://proxy.test:8080",
+        "https": "http://proxy.test:8080",
+    }
+    assert session.kwargs["headers"]["Accept-Language"].startswith("fi-FI")
+    assert "User-Agent" not in session.kwargs["headers"]
+
+
+def test_fetch_text_uses_provided_session(
+    fake_html_session: type[FakeAsyncSession],
+) -> None:
+    url = "https://example.test/jobs"
+    fake_html_session.response_factory = lambda call, requested: FakeResponse(
+        200, text="ok"
+    )
+    session = fake_html_session()
+
+    async def run() -> None:
+        assert await http.fetch_text(url, session=session) == "ok"
+        assert await http.fetch_text(url, session=session) == "ok"
+
+    asyncio.run(run())
+
+    assert session.calls == 2
+    assert fake_html_session.instances == [session]
 
 
 def test_fetch_text_rejects_url_without_scheme(
-    fake_client: type[FakeAsyncClient],
+    fake_html_session: type[FakeAsyncSession],
 ) -> None:
     with pytest.raises(ValueError, match="Invalid URL"):
         asyncio.run(http.fetch_text("example.test/jobs"))
 
 
-def test_fetch_text_sends_configured_user_agent(
-    fake_client: type[FakeAsyncClient],
-) -> None:
-    url = "https://example.test/jobs"
-    fake_client.response_factory = lambda call, requested: _response(
-        requested, 200, text="ok"
-    )
-
-    assert asyncio.run(http.fetch_text(url)) == "ok"
-    assert fake_client.instances[0].kwargs["headers"]["User-Agent"] == "test-agent"
-
-
 def test_fetch_text_logs_403_without_retrying(
-    fake_client: type[FakeAsyncClient],
+    fake_html_session: type[FakeAsyncSession],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     url = "https://example.test/jobs"
-    fake_client.response_factory = lambda call, requested: _response(
-        requested,
+    fake_html_session.response_factory = lambda call, requested: FakeResponse(
         403,
-        text="<html>Sorry, you have been blocked</html>",
+        text="<html><title>Just a moment...</title>Sorry, you have been blocked</html>",
         headers={
             "server": "cloudflare",
             "cf-ray": "abc123",
@@ -85,18 +178,19 @@ def test_fetch_text_logs_403_without_retrying(
         },
     )
 
-    with caplog.at_level(logging.ERROR), pytest.raises(httpx.HTTPStatusError):
+    with caplog.at_level(logging.ERROR), pytest.raises(RuntimeError):
         asyncio.run(http.fetch_text(url))
 
-    assert fake_client.instances[0].calls == 1
+    assert fake_html_session.instances[0].calls == 1
     assert "HTTP 403" in caplog.text
     assert "cf-ray" in caplog.text
     assert "abc123" in caplog.text
-    assert "Sorry, you have been blocked" in caplog.text
+    assert "Just a moment" in caplog.text
+    assert "Cloudflare challenge blocked" in caplog.text
 
 
 def test_fetch_text_retries_retryable_status(
-    fake_client: type[FakeAsyncClient],
+    fake_html_session: type[FakeAsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     url = "https://example.test/jobs"
@@ -106,12 +200,12 @@ def test_fetch_text_retries_retryable_status(
 
     monkeypatch.setattr(http.asyncio, "sleep", fake_sleep)
 
-    def response_factory(call: int, requested: str) -> httpx.Response:
+    def response_factory(call: int, requested: str) -> FakeResponse:
         if call == 1:
-            return _response(requested, 503, text="unavailable")
-        return _response(requested, 200, text="ok")
+            return FakeResponse(503, text="unavailable")
+        return FakeResponse(200, text="ok")
 
-    fake_client.response_factory = response_factory
+    fake_html_session.response_factory = response_factory
 
     assert asyncio.run(http.fetch_text(url)) == "ok"
-    assert fake_client.instances[0].calls == 2
+    assert fake_html_session.instances[0].calls == 2
