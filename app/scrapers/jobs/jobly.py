@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup, Tag
 
 from app.models.source import Source
 from app.scrapers.base import JobSourceAdapter, ScrapedJob
-from app.scrapers.http import HTML_HEADERS, fetch_text
+from app.scrapers.http import fetch_text, html_session
 from app.scrapers.registry import register_job_adapter
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,10 @@ BASE_URL = "https://www.jobly.fi"
 DATE_FORMAT = "%d.%m.%Y"
 EXTERNAL_ID_RE = re.compile(r"(\d+)/?$")
 PAGE_PARAM_RE = re.compile(r"(^|&)page=[^&]*")
-REQUEST_HEADERS = {**HTML_HEADERS, "Referer": f"{BASE_URL}/"}
+REQUEST_HEADERS = {
+    "Accept-Language": "fi-FI,fi;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": f"{BASE_URL}/",
+}
 
 
 @register_job_adapter
@@ -33,22 +36,21 @@ class JoblyJobAdapter(JobSourceAdapter):
 
         jobs: list[ScrapedJob] = []
         seen: set[str] = set()
-        for page in range(MAX_PAGES):
-            html = await fetch_text(
-                _with_page(source.url, page), headers=REQUEST_HEADERS
-            )
-            page_jobs = self._parse_page(html)
-            if not page_jobs:
-                break
+        async with html_session(headers=REQUEST_HEADERS) as session:
+            for page in range(MAX_PAGES):
+                html = await fetch_text(_with_page(source.url, page), session=session)
+                page_jobs = self._parse_page(html)
+                if not page_jobs:
+                    break
 
-            for job in page_jobs:
-                if job.external_id in seen:
-                    continue
-                seen.add(job.external_id)
-                jobs.append(job)
+                for job in page_jobs:
+                    if job.external_id in seen:
+                        continue
+                    seen.add(job.external_id)
+                    jobs.append(job)
 
-            if page < MAX_PAGES - 1:
-                await asyncio.sleep(PAGE_DELAY_SECONDS)
+                if page < MAX_PAGES - 1:
+                    await asyncio.sleep(PAGE_DELAY_SECONDS)
 
         return jobs
 

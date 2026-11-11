@@ -1,9 +1,12 @@
 import asyncio
 import logging
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 import httpx
+from curl_cffi import AsyncSession
+from curl_cffi.requests.errors import RequestsError
 
 from app.core.config import get_settings
 
@@ -41,6 +44,14 @@ HTML_HEADERS = {
 }
 
 
+class ResponseLike(Protocol):
+    status_code: int
+    headers: Mapping[str, str]
+    text: str
+
+    def raise_for_status(self) -> Any: ...
+
+
 def validate_url(url: str) -> None:
     parts = urlsplit(url)
     if parts.scheme not in {"http", "https"} or not parts.netloc:
@@ -49,7 +60,7 @@ def validate_url(url: str) -> None:
         )
 
 
-def _log_failed_response(url: str, response: httpx.Response) -> None:
+def _log_failed_response(url: str, response: ResponseLike) -> None:
     headers = {
         name: response.headers[name]
         for name in LOGGED_RESPONSE_HEADERS
@@ -68,9 +79,35 @@ def _log_failed_response(url: str, response: httpx.Response) -> None:
         body[:BODY_LOG_LIMIT],
     )
 
+    if response.status_code == 403 and (
+        headers.get("cf-mitigated") == "challenge" or "Just a moment" in body
+    ):
+        logger.error(
+            "Cloudflare challenge blocked %s (cf-ray=%s, cf-mitigated=%s)",
+            url,
+            headers.get("cf-ray"),
+            headers.get("cf-mitigated"),
+        )
+
 
 def _retry_delay(attempt: int) -> float:
     return 0.5 * (2 ** (attempt - 1))
+
+
+def _build_proxies(proxy_url: str | None) -> dict[str, str] | None:
+    if not proxy_url:
+        return None
+    return {"http": proxy_url, "https": proxy_url}
+
+
+def html_session(*, headers: dict[str, str] | None = None) -> AsyncSession:
+    settings = get_settings()
+    return AsyncSession(
+        impersonate=settings.scraper_impersonate,
+        timeout=DEFAULT_TIMEOUT,
+        headers={**HTML_HEADERS, **(headers or {})},
+        proxies=_build_proxies(settings.scraper_proxy_url),
+    )
 
 
 async def _fetch(
@@ -132,6 +169,53 @@ async def _fetch(
     raise RuntimeError("fetch exhausted all attempts")
 
 
+async def _fetch_html(
+    session: AsyncSession,
+    url: str,
+    *,
+    attempts: int = DEFAULT_ATTEMPTS,
+) -> ResponseLike:
+    validate_url(url)
+
+    for attempt in range(1, attempts + 1):
+        try:
+            response = await session.get(url)
+        except RequestsError as exc:
+            if attempt >= attempts:
+                raise
+            delay = _retry_delay(attempt)
+            logger.warning(
+                "Fetch failed (attempt %s/%s): %s; retrying in %ss",
+                attempt,
+                attempts,
+                exc,
+                delay,
+            )
+            await asyncio.sleep(delay)
+            continue
+
+        if response.status_code < 400:
+            return response
+
+        _log_failed_response(url, response)
+
+        if response.status_code in RETRYABLE_STATUS_CODES and attempt < attempts:
+            delay = _retry_delay(attempt)
+            logger.warning(
+                "Fetch failed (attempt %s/%s): HTTP %s; retrying in %ss",
+                attempt,
+                attempts,
+                response.status_code,
+                delay,
+            )
+            await asyncio.sleep(delay)
+            continue
+
+        response.raise_for_status()
+
+    raise RuntimeError("fetch exhausted all attempts")
+
+
 async def fetch_json(
     url: str,
     *,
@@ -151,6 +235,12 @@ async def fetch_text(
     *,
     headers: dict[str, str] | None = None,
     attempts: int = DEFAULT_ATTEMPTS,
+    session: AsyncSession | None = None,
 ) -> str:
-    response = await _fetch(url, headers=headers, attempts=attempts)
-    return response.text
+    if session is not None:
+        response = await _fetch_html(session, url, attempts=attempts)
+        return response.text
+
+    async with html_session(headers=headers) as client_session:
+        response = await _fetch_html(client_session, url, attempts=attempts)
+        return response.text

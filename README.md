@@ -13,8 +13,8 @@ Python adapters, so adding a new source means adding an adapter module and a
 - Pluggable job source adapters with a shared registry.
 - Source configuration stored in the `sources` table.
 - Idempotent job upserts on `(source, external_id)`.
-- JSON and HTML scraping via `httpx` (with BeautifulSoup for HTML) with
-  timeouts and retries.
+- JSON scraping via `httpx` and HTML scraping via `curl_cffi` (Chrome
+  impersonation with BeautifulSoup) with timeouts and retries.
 - CLI for managing sources and running scrapes.
 - Product scraper scaffold for future HTML scraping.
 - Password-protected login with a reusable API-key dependency.
@@ -60,7 +60,8 @@ uv run alembic upgrade head
 | `SESSION_SECRET` | `dev-insecure-change-me` | Secret used to sign session cookies |
 | `SESSION_COOKIE_NAME` | `notification_session` | Name of the session cookie |
 | `SESSION_MAX_AGE` | `2592000` | Session lifetime in seconds (30 days) |
-| `SCRAPER_USER_AGENT` | `notification-service/0.1` | `User-Agent` header used for scrape requests |
+| `SCRAPER_USER_AGENT` | `notification-service/0.1` | `User-Agent` header used for JSON scrape requests |
+| `SCRAPER_IMPERSONATE` | `chrome` | Browser TLS fingerprint impersonated for HTML scrape requests |
 | `SCRAPER_PROXY_URL` | empty | Optional HTTP(S) proxy for scrape requests |
 
 `APP_PASSWORD` is required when `ENVIRONMENT=production`, and `SESSION_SECRET`
@@ -332,5 +333,8 @@ parameter, and maps:
 - the job title -> `title`
 - `link`, `date_posted` (ISO date), and `location` -> `raw_data`
 
-The shared HTTP helpers provide `fetch_json` and `fetch_text`, both with
-timeouts and retries. Use `fetch_text` with BeautifulSoup for HTML sources.
+The shared HTTP helpers provide `fetch_json` (via `httpx`) and `fetch_text`
+(via `curl_cffi` with browser TLS/HTTP2 impersonation), both with timeouts and
+retries. Use `fetch_text` with BeautifulSoup for HTML sources. `fetch_text`
+accepts an optional `session` so an adapter can reuse one `curl_cffi` session
+across pages and keep cookies.

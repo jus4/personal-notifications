@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     session_max_age: int = 60 * 60 * 24 * 30
     scrape_interval_seconds: int = 60 * 30
     scraper_user_agent: str = "notification-service/0.1"
+    scraper_impersonate: str = "chrome"
     scraper_proxy_url: str | None = None
     websocket_job_limit: int = 10
     websocket_backlog_limit: int = 100
