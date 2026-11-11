@@ -1,8 +1,9 @@
+import asyncio
 import logging
 import re
 from datetime import datetime
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
 
@@ -14,9 +15,12 @@ from app.scrapers.registry import register_job_adapter
 logger = logging.getLogger(__name__)
 
 MAX_PAGES = 5
+PAGE_DELAY_SECONDS = 1.0
 BASE_URL = "https://www.jobly.fi"
 DATE_FORMAT = "%d.%m.%Y"
 EXTERNAL_ID_RE = re.compile(r"(\d+)/?$")
+PAGE_PARAM_RE = re.compile(r"(^|&)page=[^&]*")
+REQUEST_HEADERS = {**HTML_HEADERS, "Referer": f"{BASE_URL}/"}
 
 
 @register_job_adapter
@@ -30,7 +34,9 @@ class JoblyJobAdapter(JobSourceAdapter):
         jobs: list[ScrapedJob] = []
         seen: set[str] = set()
         for page in range(MAX_PAGES):
-            html = await fetch_text(_with_page(source.url, page), headers=HTML_HEADERS)
+            html = await fetch_text(
+                _with_page(source.url, page), headers=REQUEST_HEADERS
+            )
             page_jobs = self._parse_page(html)
             if not page_jobs:
                 break
@@ -40,6 +46,9 @@ class JoblyJobAdapter(JobSourceAdapter):
                     continue
                 seen.add(job.external_id)
                 jobs.append(job)
+
+            if page < MAX_PAGES - 1:
+                await asyncio.sleep(PAGE_DELAY_SECONDS)
 
         return jobs
 
@@ -118,6 +127,8 @@ def _absolute_url(href: str) -> str:
 
 def _with_page(url: str, page: int) -> str:
     parts = urlsplit(url)
-    query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    query["page"] = str(page)
-    return urlunsplit(parts._replace(query=urlencode(query)))
+    if PAGE_PARAM_RE.search(parts.query):
+        query = PAGE_PARAM_RE.sub(rf"\g<1>page={page}", parts.query)
+    else:
+        query = f"{parts.query}&page={page}" if parts.query else f"page={page}"
+    return urlunsplit(parts._replace(query=query))

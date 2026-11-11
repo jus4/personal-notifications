@@ -60,6 +60,8 @@ uv run alembic upgrade head
 | `SESSION_SECRET` | `dev-insecure-change-me` | Secret used to sign session cookies |
 | `SESSION_COOKIE_NAME` | `notification_session` | Name of the session cookie |
 | `SESSION_MAX_AGE` | `2592000` | Session lifetime in seconds (30 days) |
+| `SCRAPER_USER_AGENT` | `notification-service/0.1` | `User-Agent` header used for scrape requests |
+| `SCRAPER_PROXY_URL` | empty | Optional HTTP(S) proxy for scrape requests |
 
 `APP_PASSWORD` is required when `ENVIRONMENT=production`, and `SESSION_SECRET`
 must be changed from its development default.
@@ -226,6 +228,10 @@ Scrape behavior:
 - Duplicate `external_id` values in one payload are skipped.
 - One failing source is logged and does not stop other sources.
 - The command exits with code `1` if any source fails.
+- Failed HTTP responses log the status, useful headers (`server`, `cf-ray`,
+  `cf-mitigated`, `content-type`, `location`, `retry-after`), and a truncated
+  body so blocked responses can be diagnosed from production logs.
+- `429` and `5xx` responses are retried; other `4xx` responses fail immediately.
 
 ### Cron example
 

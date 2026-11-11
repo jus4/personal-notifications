@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import logging
 from collections.abc import Sequence
+from urllib.parse import urlsplit
 
 from sqlmodel import Session, col, select
 
@@ -13,6 +14,15 @@ from app.services.scrape import run_source
 logger = logging.getLogger(__name__)
 
 JOB_KINDS = ["jobs"]
+
+
+def _absolute_http_url(value: str) -> str:
+    parts = urlsplit(value)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        raise argparse.ArgumentTypeError(
+            f"invalid URL {value!r}: expected an absolute http:// or https:// URL"
+        )
+    return value
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_parser.add_argument("--slug", required=True)
     add_parser.add_argument("--kind", default="jobs", choices=JOB_KINDS)
     add_parser.add_argument("--adapter", required=True)
-    add_parser.add_argument("--url", required=True)
+    add_parser.add_argument("--url", required=True, type=_absolute_http_url)
     add_parser.add_argument(
         "--disabled",
         action="store_true",

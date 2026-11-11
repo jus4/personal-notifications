@@ -6,7 +6,15 @@ import pytest
 from app.models.source import Source
 from app.scrapers.jobs import jobly
 
-SOURCE_URL = "https://www.jobly.fi/tyopaikat/it?search=&job_geo_location=Uusimaa&page=0"
+SOURCE_URL = (
+    "https://www.jobly.fi/tyopaikat/it?search=&job_geo_location=Uusimaa%2C%20Suomi"
+    "&administrative_area_level_1=Uusimaa&page=0"
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_page_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(jobly, "PAGE_DELAY_SECONDS", 0)
 
 
 def _make_source(url: str = SOURCE_URL) -> Source:
@@ -75,6 +83,7 @@ def test_fetch_maps_jobly_jobs(monkeypatch: Any) -> None:
         "location": "Espoo",
     }
     assert "page=0" in requested[0]
+    assert "job_geo_location=Uusimaa%2C%20Suomi" in requested[0]
     assert len(requested) == 2
 
 
