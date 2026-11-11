@@ -40,6 +40,30 @@ def test_run_source_uses_registered_adapter(
     assert result.updated == 0
 
 
+def test_run_source_returns_inserted_ids_only_for_new_jobs(
+    monkeypatch: Any,
+    session: Session,
+) -> None:
+    class FakeAdapter:
+        key = "fake-inserted"
+
+        async def fetch(self, source: Source) -> list[ScrapedJob]:
+            return [
+                ScrapedJob(external_id="1", title="Fake job"),
+                ScrapedJob(external_id="2", title="Another job"),
+            ]
+
+    monkeypatch.setitem(JOB_ADAPTERS, FakeAdapter.key, FakeAdapter)
+    source = _make_source(adapter="fake-inserted")
+
+    first = asyncio.run(run_source(session, source))
+    assert len(first.inserted_ids) == 2
+
+    second = asyncio.run(run_source(session, source))
+    assert second.inserted_ids == []
+    assert second.updated == 2
+
+
 def test_run_source_rejects_unknown_adapter(session: Session) -> None:
     with pytest.raises(ValueError, match="No job adapter registered"):
         asyncio.run(run_source(session, _make_source(adapter="missing")))

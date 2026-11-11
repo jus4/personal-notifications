@@ -28,10 +28,20 @@ async def websocket_endpoint(
         if session.get(User, user_id) is None:
             await websocket.close(code=1008)
             return
-        jobs = JobRepository(session).list_unread_jobs_for_user(
-            user_id,
-            resend_after_seconds=settings.job_reshow_after_seconds,
-        )
+        repository = JobRepository(session)
+        if repository.has_shown_history(user_id):
+            jobs = repository.list_unread_jobs_for_user(
+                user_id,
+                resend_after_seconds=settings.job_reshow_after_seconds,
+                limit=settings.websocket_job_limit,
+                posted_within_days=settings.job_recency_days,
+            )
+        else:
+            jobs = repository.list_unread_jobs_for_user(
+                user_id,
+                resend_after_seconds=settings.job_reshow_after_seconds,
+                limit=settings.websocket_backlog_limit,
+            )
         payloads = [serialize_job(job) for job in jobs]
         job_ids = [job.id for job in jobs if job.id is not None]
 

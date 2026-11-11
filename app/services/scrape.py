@@ -19,6 +19,7 @@ class ScrapeResult:
     updated: int = 0
     skipped: int = 0
     failed: int = 0
+    inserted_ids: list[int] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -32,6 +33,7 @@ class ScrapeBatchResult:
     results: list[ScrapeResult] = field(default_factory=list)
     failures: list[ScrapeFailure] = field(default_factory=list)
     source_count: int = 0
+    inserted_ids: list[int] = field(default_factory=list)
 
 
 async def run_source(session: Session, source: Source) -> ScrapeResult:
@@ -52,6 +54,7 @@ async def run_source(session: Session, source: Source) -> ScrapeResult:
         updated=upsert.updated,
         skipped=upsert.skipped,
         failed=upsert.failed,
+        inserted_ids=upsert.inserted_ids,
     )
 
 
@@ -71,7 +74,9 @@ async def run_enabled_sources(
     for source in sources:
         slug = source.slug
         try:
-            batch.results.append(await run_source(session, source))
+            result = await run_source(session, source)
+            batch.results.append(result)
+            batch.inserted_ids.extend(result.inserted_ids)
         except Exception as exc:
             session.rollback()
             logger.exception("Scrape failed for %s", slug)

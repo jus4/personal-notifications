@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     session_max_age: int = 60 * 60 * 24 * 30
     scrape_interval_seconds: int = 60 * 30
     websocket_job_limit: int = 10
+    websocket_backlog_limit: int = 100
     job_reshow_after_seconds: int = 60 * 30
+    job_recency_days: int = 30
 
     @property
     def is_production(self) -> bool:

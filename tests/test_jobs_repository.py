@@ -23,6 +23,31 @@ def test_upsert_inserts_new_jobs(session: Session) -> None:
     assert {job.external_id for job in jobs} == {"1", "2"}
 
 
+def test_upsert_reports_inserted_ids_only(session: Session) -> None:
+    repository = JobRepository(session)
+
+    first = repository.upsert_many(
+        "duunitori",
+        [ScrapedJob(external_id="1", title="First")],
+    )
+
+    first_job = session.exec(select(Job).where(Job.external_id == "1")).one()
+    assert first.inserted_ids == [first_job.id]
+
+    second = repository.upsert_many(
+        "duunitori",
+        [
+            ScrapedJob(external_id="1", title="Updated"),
+            ScrapedJob(external_id="2", title="Second"),
+        ],
+    )
+
+    second_job = session.exec(select(Job).where(Job.external_id == "2")).one()
+    assert second.inserted == 1
+    assert second.updated == 1
+    assert second.inserted_ids == [second_job.id]
+
+
 def test_upsert_updates_existing_and_skips_duplicates(session: Session) -> None:
     repository = JobRepository(session)
     repository.upsert_many(
