@@ -11,6 +11,8 @@ settings = get_settings()
 engine = create_engine(
     settings.normalized_database_url,
     echo=settings.sql_echo,
+    pool_pre_ping=True,
+    pool_recycle=settings.db_pool_recycle_seconds,
 )
 
 

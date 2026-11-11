@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     test_database_url: str | None = None
     environment: str = "development"
     sql_echo: bool = False
+    db_pool_recycle_seconds: int = 1800
     app_password: str = ""
     session_secret: str = "dev-insecure-change-me"
     session_cookie_name: str = "notification_session"
