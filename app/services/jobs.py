@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -20,6 +20,7 @@ class UpsertResult:
     updated: int = 0
     skipped: int = 0
     failed: int = 0
+    inserted_ids: list[int] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -86,6 +87,10 @@ class JobRepository:
     def _posted_date_sort_expr(self):
         return cast(self._posted_date_expr(), DateTime(timezone=True))
 
+    def _posted_within_days_condition(self, days: int):
+        cutoff = (utcnow().date() - timedelta(days=days)).isoformat()
+        return func.substr(self._posted_date_expr(), 1, 10) >= cutoff
+
     def list_jobs(
         self,
         filters: JobFilters,
@@ -143,6 +148,8 @@ class JobRepository:
         user_id: int,
         *,
         resend_after_seconds: int = 1800,
+        limit: int | None = None,
+        posted_within_days: int | None = None,
     ) -> list[Job]:
         delivery = aliased(UserJobDelivery)
         cutoff = utcnow() - timedelta(seconds=resend_after_seconds)
@@ -168,13 +175,55 @@ class JobRepository:
                     ),
                 )
             )
-            .order_by(
-                desc(self._posted_date_sort_expr()).nulls_last(),
-                col(Job.scraped_at).desc(),
-                col(Job.id).desc(),
+        )
+
+        if posted_within_days is not None:
+            statement = statement.where(
+                self._posted_within_days_condition(posted_within_days)
             )
+
+        statement = statement.order_by(
+            desc(self._posted_date_sort_expr()).nulls_last(),
+            col(Job.scraped_at).desc(),
+            col(Job.id).desc(),
+        )
+
+        if limit is not None:
+            statement = statement.limit(limit)
+
+        return list(self.session.exec(statement).all())
+
+    def list_jobs_for_notification(
+        self,
+        job_ids: list[int],
+        *,
+        posted_within_days: int | None = None,
+    ) -> list[Job]:
+        if not job_ids:
+            return []
+
+        statement = select(Job).where(col(Job.id).in_(job_ids))
+        if posted_within_days is not None:
+            statement = statement.where(
+                self._posted_within_days_condition(posted_within_days)
+            )
+        statement = statement.order_by(
+            desc(self._posted_date_sort_expr()).nulls_last(),
+            col(Job.scraped_at).desc(),
+            col(Job.id).desc(),
         )
         return list(self.session.exec(statement).all())
+
+    def has_shown_history(self, user_id: int) -> bool:
+        statement = (
+            select(col(UserJobDelivery.id))
+            .where(
+                col(UserJobDelivery.user_id) == user_id,
+                col(UserJobDelivery.shown_at).is_not(None),
+            )
+            .limit(1)
+        )
+        return self.session.exec(statement).first() is not None
 
     def mark_jobs_sent(self, user_id: int, job_ids: list[int]) -> None:
         if not job_ids:
@@ -303,18 +352,19 @@ class JobRepository:
         }
 
         scraped_at = utcnow()
+        inserted_jobs: list[Job] = []
         for external_id, scraped_job in unique_jobs.items():
             current = existing.get(external_id)
             if current is None:
-                self.session.add(
-                    Job(
-                        external_id=external_id,
-                        source=source,
-                        title=scraped_job.title,
-                        raw_data=scraped_job.raw_data,
-                        scraped_at=scraped_at,
-                    )
+                job = Job(
+                    external_id=external_id,
+                    source=source,
+                    title=scraped_job.title,
+                    raw_data=scraped_job.raw_data,
+                    scraped_at=scraped_at,
                 )
+                self.session.add(job)
+                inserted_jobs.append(job)
                 result.inserted += 1
                 continue
 
@@ -325,6 +375,10 @@ class JobRepository:
             result.updated += 1
 
         try:
+            self.session.flush()
+            result.inserted_ids = [
+                job.id for job in inserted_jobs if job.id is not None
+            ]
             self.session.commit()
         except Exception:
             self.session.rollback()

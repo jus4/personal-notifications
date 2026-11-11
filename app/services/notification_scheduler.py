@@ -15,33 +15,34 @@ settings = get_settings()
 scrape_lock = asyncio.Lock()
 
 
-async def notify_connected_users(session: Session) -> None:
+async def notify_connected_users(session: Session, job_ids: list[int]) -> None:
     repository = JobRepository(session)
+    jobs = repository.list_jobs_for_notification(
+        job_ids,
+        posted_within_days=settings.job_recency_days,
+    )
+    payloads = [serialize_job(job) for job in jobs]
+    notifiable_ids = [job.id for job in jobs if job.id is not None]
 
     for user_id in manager.user_ids():
-        jobs = repository.list_unread_jobs_for_user(
-            user_id,
-            resend_after_seconds=settings.job_reshow_after_seconds,
-        )
-        print(jobs)
-        if not jobs:
-            await manager.send_to_user(user_id, {"type": "no_new_jobs", "status": "success"})
+        if not payloads:
+            await manager.send_to_user(
+                user_id, {"type": "no_new_jobs", "status": "success"}
+            )
             continue
 
-        payloads = [serialize_job(job) for job in jobs]
-        job_ids = [job.id for job in jobs if job.id is not None]
         sent = await manager.send_to_user(
             user_id,
             {"type": "new_jobs", "status": "success", "data": {"jobs": payloads}},
         )
         if sent:
-            repository.mark_jobs_sent(user_id, job_ids)
+            repository.mark_jobs_sent(user_id, notifiable_ids)
             session.commit()
 
 
 async def scrape_and_notify(session: Session) -> ScrapeBatchResult:
     batch = await run_enabled_sources(session)
-    await notify_connected_users(session)
+    await notify_connected_users(session, batch.inserted_ids)
     return batch
 
 

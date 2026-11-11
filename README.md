@@ -19,13 +19,13 @@ Python adapters, so adding a new source means adding an adapter module and a
 - Password-protected login with a reusable API-key dependency.
 - Frontpage dashboard with job/source stats and an on-demand scrape action.
 - Filterable jobs listing with title, source, link, posted, and scraped dates.
-- SQLite by default, PostgreSQL supported through `DATABASE_URL`.
+- PostgreSQL storage configured through `DATABASE_URL`.
 
 ## Requirements
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
-- SQLite (default) or PostgreSQL
+- PostgreSQL
 
 ## Setup
 
@@ -51,7 +51,8 @@ uv run alembic upgrade head
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `DATABASE_URL` | `sqlite:///./data/app.db` | SQLAlchemy database URL |
+| `DATABASE_URL` | required | PostgreSQL SQLAlchemy database URL |
+| `TEST_DATABASE_URL` | required for tests | PostgreSQL database URL used by the test suite |
 | `ENVIRONMENT` | `development` | Environment name |
 | `SQL_ECHO` | `false` | Log SQL statements when enabled |
 | `APP_PASSWORD` | empty | Login password; also used as the external API key |
@@ -225,6 +226,10 @@ Scraping is intentionally separate from the FastAPI process. A future scheduler
 or worker can reuse `run_source` from `app/services/scrape.py`.
 
 ## Tests and linting
+
+Tests require a PostgreSQL server. Set `TEST_DATABASE_URL` to a dedicated test
+database; the suite recreates its schema and will refuse to run against the same
+database as `DATABASE_URL`.
 
 ```bash
 uv run ruff check .
