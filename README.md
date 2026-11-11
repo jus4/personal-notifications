@@ -13,7 +13,8 @@ Python adapters, so adding a new source means adding an adapter module and a
 - Pluggable job source adapters with a shared registry.
 - Source configuration stored in the `sources` table.
 - Idempotent job upserts on `(source, external_id)`.
-- JSON scraping via `httpx` with timeouts and retries.
+- JSON and HTML scraping via `httpx` (with BeautifulSoup for HTML) with
+  timeouts and retries.
 - CLI for managing sources and running scrapes.
 - Product scraper scaffold for future HTML scraping.
 - Password-protected login with a reusable API-key dependency.
@@ -183,6 +184,16 @@ uv run python -m app.cli sources add \
 The source URL is stored in the database and is not committed to the
 repository. Use `--disabled` to save the source without enabling it.
 
+For example, to add Jobly:
+
+```bash
+uv run python -m app.cli sources add \
+  --slug jobly \
+  --kind jobs \
+  --adapter jobly_html \
+  --url 'https://www.jobly.fi/tyopaikat/it?search=&job_geo_location=Uusimaa%2C%20Suomi&administrative_area_level_1=Uusimaa&lat=60.21872&lon=25.271621&country=Suomi&page=0'
+```
+
 List sources:
 
 ```bash
@@ -299,13 +310,21 @@ Source row
 5. Add the source row with `sources add`.
 6. Add fixture-based tests for the mapping logic.
 
-The current `duunitori_json` adapter expects a JSON object with a `results`
-list. It maps:
+The `duunitori_json` adapter expects a JSON object with a `results` list. It
+maps:
 
 - `id` -> `external_id`
 - `heading` (falling back to `short_heading`) -> `title`
 - the full result object -> `raw_data`
 
-The shared HTTP helper currently provides `fetch_json`. Future HTML sources
-should add a text/response fetch helper and use BeautifulSoup inside the source
-adapter.
+The `jobly_html` adapter scrapes Jobly search pages with BeautifulSoup. It
+fetches up to 5 pages from the configured URL, replacing the `page` query
+parameter, and maps:
+
+- the numeric suffix of the job link (for example `...-2787385`) ->
+  `external_id`
+- the job title -> `title`
+- `link`, `date_posted` (ISO date), and `location` -> `raw_data`
+
+The shared HTTP helpers provide `fetch_json` and `fetch_text`, both with
+timeouts and retries. Use `fetch_text` with BeautifulSoup for HTML sources.
