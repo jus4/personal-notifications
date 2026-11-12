@@ -62,7 +62,9 @@ uv run alembic upgrade head
 | `SESSION_MAX_AGE` | `2592000` | Session lifetime in seconds (30 days) |
 | `SCRAPER_USER_AGENT` | `notification-service/0.1` | `User-Agent` header used for JSON scrape requests |
 | `SCRAPER_IMPERSONATE` | `chrome` | Browser TLS fingerprint impersonated for HTML scrape requests |
-| `SCRAPER_PROXY_URL` | empty | Optional HTTP(S) proxy for scrape requests |
+| `SCRAPER_PROXY_URL` | empty | Optional HTTP(S) proxy for all scrape requests |
+| `SCRAPER_HTML_PROXY_URL` | empty | Optional HTTP(S) proxy for HTML sources (falls back to `SCRAPER_PROXY_URL`) |
+| `SCRAPER_TIMEOUT_SECONDS` | `15` | Timeout for scrape requests in seconds |
 
 `APP_PASSWORD` is required when `ENVIRONMENT=production`, and `SESSION_SECRET`
 must be changed from its development default.
@@ -332,6 +334,10 @@ parameter, and maps:
   `external_id`
 - the job title -> `title`
 - `link`, `date_posted` (ISO date), and `location` -> `raw_data`
+
+Set `SCRAPER_HTML_PROXY_URL` to route HTML sources (currently Jobly) through a
+proxy while JSON sources stay direct. A sticky proxy is recommended so the
+Cloudflare clearance cookie remains valid across pages.
 
 The shared HTTP helpers provide `fetch_json` (via `httpx`) and `fetch_text`
 (via `curl_cffi` with browser TLS/HTTP2 impersonation), both with timeouts and

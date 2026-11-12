@@ -75,6 +75,8 @@ def settings(monkeypatch: pytest.MonkeyPatch) -> Any:
         scraper_user_agent = "test-agent"
         scraper_impersonate = "chrome"
         scraper_proxy_url = None
+        scraper_html_proxy_url = None
+        scraper_timeout_seconds = 15.0
 
     stub = SettingsStub()
     monkeypatch.setattr(http, "get_settings", lambda: stub)
@@ -115,11 +117,13 @@ def test_fetch_json_sends_configured_user_agent(
     assert fake_httpx.instances[0].kwargs["headers"]["User-Agent"] == "test-agent"
 
 
-def test_fetch_text_configures_impersonation_and_proxy(
+def test_fetch_text_configures_impersonation_and_html_proxy(
     fake_html_session: type[FakeAsyncSession],
     settings: Any,
 ) -> None:
-    settings.scraper_proxy_url = "http://proxy.test:8080"
+    settings.scraper_proxy_url = "http://global-proxy.test:8080"
+    settings.scraper_html_proxy_url = "http://html-proxy.test:8080"
+    settings.scraper_timeout_seconds = 30.0
     url = "https://example.test/jobs"
     fake_html_session.response_factory = lambda call, requested: FakeResponse(
         200, text="ok"
@@ -129,12 +133,43 @@ def test_fetch_text_configures_impersonation_and_proxy(
 
     session = fake_html_session.instances[0]
     assert session.kwargs["impersonate"] == "chrome"
+    assert session.kwargs["timeout"] == 30.0
     assert session.kwargs["proxies"] == {
-        "http": "http://proxy.test:8080",
-        "https": "http://proxy.test:8080",
+        "http": "http://html-proxy.test:8080",
+        "https": "http://html-proxy.test:8080",
     }
     assert session.kwargs["headers"]["Accept-Language"].startswith("fi-FI")
     assert "User-Agent" not in session.kwargs["headers"]
+
+
+def test_fetch_text_falls_back_to_global_proxy(
+    fake_html_session: type[FakeAsyncSession],
+    settings: Any,
+) -> None:
+    settings.scraper_proxy_url = "http://global-proxy.test:8080"
+    fake_html_session.response_factory = lambda call, requested: FakeResponse(
+        200, text="ok"
+    )
+
+    assert asyncio.run(http.fetch_text("https://example.test/jobs")) == "ok"
+
+    assert fake_html_session.instances[0].kwargs["proxies"] == {
+        "http": "http://global-proxy.test:8080",
+        "https": "http://global-proxy.test:8080",
+    }
+
+
+def test_fetch_json_ignores_html_proxy(
+    fake_httpx: type[FakeHttpxClient],
+    settings: Any,
+) -> None:
+    settings.scraper_html_proxy_url = "http://html-proxy.test:8080"
+    fake_httpx.response_factory = lambda call, requested: _httpx_response(
+        requested, 200, json={"results": []}
+    )
+
+    assert asyncio.run(http.fetch_json("https://example.test/jobs")) == {"results": []}
+    assert fake_httpx.instances[0].kwargs["proxy"] is None
 
 
 def test_fetch_text_uses_provided_session(
@@ -209,3 +244,14 @@ def test_fetch_text_retries_retryable_status(
 
     assert asyncio.run(http.fetch_text(url)) == "ok"
     assert fake_html_session.instances[0].calls == 2
+
+
+def test_fetch_text_without_proxies(
+    fake_html_session: type[FakeAsyncSession],
+) -> None:
+    fake_html_session.response_factory = lambda call, requested: FakeResponse(
+        200, text="ok"
+    )
+
+    assert asyncio.run(http.fetch_text("https://example.test/jobs")) == "ok"
+    assert fake_html_session.instances[0].kwargs["proxies"] is None

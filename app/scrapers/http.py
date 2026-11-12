@@ -12,7 +12,6 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 15.0
 DEFAULT_ATTEMPTS = 3
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 LOGGED_RESPONSE_HEADERS = (
@@ -102,11 +101,12 @@ def _build_proxies(proxy_url: str | None) -> dict[str, str] | None:
 
 def html_session(*, headers: dict[str, str] | None = None) -> AsyncSession:
     settings = get_settings()
+    proxy_url = settings.scraper_html_proxy_url or settings.scraper_proxy_url
     return AsyncSession(
         impersonate=settings.scraper_impersonate,
-        timeout=DEFAULT_TIMEOUT,
+        timeout=settings.scraper_timeout_seconds,
         headers={**HTML_HEADERS, **(headers or {})},
-        proxies=_build_proxies(settings.scraper_proxy_url),
+        proxies=_build_proxies(proxy_url),
     )
 
 
@@ -126,7 +126,7 @@ async def _fetch(
     }
 
     async with httpx.AsyncClient(
-        timeout=DEFAULT_TIMEOUT,
+        timeout=settings.scraper_timeout_seconds,
         headers=request_headers,
         proxy=settings.scraper_proxy_url or None,
     ) as client:
