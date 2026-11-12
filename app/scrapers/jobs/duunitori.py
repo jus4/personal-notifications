@@ -1,8 +1,10 @@
 import logging
 from typing import Any
 
+from app.core.config import get_settings
 from app.models.source import Source
 from app.scrapers.base import JobSourceAdapter, ScrapedJob
+from app.scrapers.config import resolve_http_profile
 from app.scrapers.http import fetch_json
 from app.scrapers.registry import register_job_adapter
 
@@ -17,7 +19,8 @@ class DuunitoriJobAdapter(JobSourceAdapter):
         if not source.url:
             raise ValueError(f"Source {source.slug!r} has no URL configured")
 
-        payload = await fetch_json(source.url)
+        profile = resolve_http_profile(source, get_settings(), html=False)
+        payload = await fetch_json(source.url, profile=profile)
         if not isinstance(payload, dict):
             raise TypeError("Expected a JSON object from Duunitori")
 

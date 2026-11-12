@@ -1,14 +1,18 @@
 import argparse
 import asyncio
+import json
 import logging
 from collections.abc import Sequence
+from typing import Any
 from urllib.parse import urlsplit
 
+from pydantic import ValidationError
 from sqlmodel import Session, col, select
 
 from app.db.session import engine
 from app.models.common import utcnow
 from app.models.source import Source
+from app.scrapers.config import SourceScraperConfig
 from app.services.scrape import run_source
 
 logger = logging.getLogger(__name__)
@@ -25,6 +29,20 @@ def _absolute_http_url(value: str) -> str:
     return value
 
 
+def _config_json(value: str) -> dict[str, Any]:
+    try:
+        config = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(f"invalid JSON: {exc}") from exc
+    if not isinstance(config, dict):
+        raise argparse.ArgumentTypeError("config must be a JSON object")
+    try:
+        SourceScraperConfig.model_validate(config)
+    except ValidationError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return config
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="notification-service")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -39,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_parser.add_argument("--kind", default="jobs", choices=JOB_KINDS)
     add_parser.add_argument("--adapter", required=True)
     add_parser.add_argument("--url", required=True, type=_absolute_http_url)
+    add_parser.add_argument(
+        "--config-json",
+        type=_config_json,
+        help="Source scraper config as a JSON object",
+    )
     add_parser.add_argument(
         "--disabled",
         action="store_true",
@@ -60,6 +83,8 @@ def _add_source(args: argparse.Namespace) -> int:
         source = session.exec(select(Source).where(Source.slug == args.slug)).first()
         now = utcnow()
 
+        config = args.config_json
+
         if source is None:
             source = Source(
                 slug=args.slug,
@@ -67,6 +92,7 @@ def _add_source(args: argparse.Namespace) -> int:
                 adapter=args.adapter,
                 url=args.url,
                 enabled=not args.disabled,
+                config=config,
                 created_at=now,
                 updated_at=now,
             )
@@ -75,6 +101,8 @@ def _add_source(args: argparse.Namespace) -> int:
             source.adapter = args.adapter
             source.url = args.url
             source.enabled = not args.disabled
+            if config is not None:
+                source.config = config
             source.updated_at = now
 
         session.add(source)

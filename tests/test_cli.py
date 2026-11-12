@@ -81,3 +81,55 @@ def test_sources_add_rejects_url_without_scheme(
                 "example.test/jobs",
             ]
         )
+
+
+def test_sources_add_stores_scraper_config(
+    monkeypatch: Any,
+    engine: Engine,
+) -> None:
+    monkeypatch.setattr(cli, "engine", engine)
+
+    assert (
+        cli.main(
+            [
+                "sources",
+                "add",
+                "--slug",
+                "jobly",
+                "--adapter",
+                "jobly_html",
+                "--url",
+                "https://example.test/jobly",
+                "--config-json",
+                '{"http": {"impersonate": "none"}}',
+            ]
+        )
+        == 0
+    )
+
+    with Session(engine) as session:
+        source = session.exec(select(Source).where(Source.slug == "jobly")).one()
+        assert source.config == {"http": {"impersonate": "none"}}
+
+
+def test_sources_add_rejects_invalid_scraper_config(
+    monkeypatch: Any,
+    engine: Engine,
+) -> None:
+    monkeypatch.setattr(cli, "engine", engine)
+
+    with pytest.raises(SystemExit):
+        cli.main(
+            [
+                "sources",
+                "add",
+                "--slug",
+                "jobly",
+                "--adapter",
+                "jobly_html",
+                "--url",
+                "https://example.test/jobly",
+                "--config-json",
+                '{"http": {"unknown": true}}',
+            ]
+        )

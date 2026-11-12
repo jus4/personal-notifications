@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -9,6 +10,7 @@ from curl_cffi import AsyncSession
 from curl_cffi.requests.errors import RequestsError
 
 from app.core.config import get_settings
+from app.scrapers.config import ResolvedHttpProfile, default_http_profile
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,9 @@ HTML_HEADERS = {
     "Sec-Fetch-Mode": "navigate",
     "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
+}
+PLAIN_HTML_HEADERS = {
+    "Accept": "*/*",
 }
 
 
@@ -99,15 +104,45 @@ def _build_proxies(proxy_url: str | None) -> dict[str, str] | None:
     return {"http": proxy_url, "https": proxy_url}
 
 
-def html_session(*, headers: dict[str, str] | None = None) -> AsyncSession:
-    settings = get_settings()
-    proxy_url = settings.scraper_html_proxy_url or settings.scraper_proxy_url
+def html_session(
+    *,
+    headers: dict[str, str] | None = None,
+    profile: ResolvedHttpProfile | None = None,
+) -> AsyncSession:
+    if profile is None:
+        profile = default_http_profile(get_settings(), html=True)
+    if profile.client != "curl_cffi":
+        raise ValueError("html_session requires the curl_cffi client")
+
+    if profile.impersonate is None:
+        session_headers = {**PLAIN_HTML_HEADERS}
+        if profile.user_agent:
+            session_headers["User-Agent"] = profile.user_agent
+    else:
+        session_headers = {**HTML_HEADERS, **(headers or {})}
+        if profile.user_agent:
+            session_headers["User-Agent"] = profile.user_agent
+
     return AsyncSession(
-        impersonate=settings.scraper_impersonate,
-        timeout=settings.scraper_timeout_seconds,
-        headers={**HTML_HEADERS, **(headers or {})},
-        proxies=_build_proxies(proxy_url),
+        impersonate=profile.impersonate,
+        timeout=profile.timeout_seconds,
+        headers=session_headers,
+        proxies=_build_proxies(profile.proxy_url),
+        http_version=profile.http_version,
     )
+
+
+@asynccontextmanager
+async def text_session(
+    profile: ResolvedHttpProfile,
+    *,
+    headers: dict[str, str] | None = None,
+) -> AsyncIterator[AsyncSession | None]:
+    if profile.client == "curl_cffi":
+        async with html_session(headers=headers, profile=profile) as session:
+            yield session
+    else:
+        yield None
 
 
 async def _fetch(
@@ -115,20 +150,23 @@ async def _fetch(
     *,
     headers: dict[str, str] | None = None,
     attempts: int = DEFAULT_ATTEMPTS,
+    profile: ResolvedHttpProfile | None = None,
 ) -> httpx.Response:
     validate_url(url)
 
     settings = get_settings()
+    if profile is None:
+        profile = default_http_profile(settings, html=False)
     request_headers = {
-        "User-Agent": settings.scraper_user_agent,
+        "User-Agent": profile.user_agent or settings.scraper_user_agent,
         **DEFAULT_HEADERS,
         **(headers or {}),
     }
 
     async with httpx.AsyncClient(
-        timeout=settings.scraper_timeout_seconds,
+        timeout=profile.timeout_seconds,
         headers=request_headers,
-        proxy=settings.scraper_proxy_url or None,
+        proxy=profile.proxy_url,
     ) as client:
         for attempt in range(1, attempts + 1):
             try:
@@ -221,8 +259,9 @@ async def fetch_json(
     *,
     headers: dict[str, str] | None = None,
     attempts: int = DEFAULT_ATTEMPTS,
+    profile: ResolvedHttpProfile | None = None,
 ) -> Any:
-    response = await _fetch(url, headers=headers, attempts=attempts)
+    response = await _fetch(url, headers=headers, attempts=attempts, profile=profile)
     try:
         return response.json()
     except ValueError:
@@ -236,11 +275,24 @@ async def fetch_text(
     headers: dict[str, str] | None = None,
     attempts: int = DEFAULT_ATTEMPTS,
     session: AsyncSession | None = None,
+    profile: ResolvedHttpProfile | None = None,
 ) -> str:
+    if profile is None:
+        profile = default_http_profile(get_settings(), html=True)
+
     if session is not None:
         response = await _fetch_html(session, url, attempts=attempts)
         return response.text
 
-    async with html_session(headers=headers) as client_session:
+    if profile.client == "httpx":
+        response = await _fetch(
+            url,
+            headers={**HTML_HEADERS, **(headers or {})},
+            attempts=attempts,
+            profile=profile,
+        )
+        return response.text
+
+    async with html_session(headers=headers, profile=profile) as client_session:
         response = await _fetch_html(client_session, url, attempts=attempts)
         return response.text

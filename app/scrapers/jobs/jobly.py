@@ -7,9 +7,11 @@ from urllib.parse import urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
 
+from app.core.config import get_settings
 from app.models.source import Source
 from app.scrapers.base import JobSourceAdapter, ScrapedJob
-from app.scrapers.http import fetch_text, html_session
+from app.scrapers.config import resolve_http_profile
+from app.scrapers.http import fetch_text, text_session
 from app.scrapers.registry import register_job_adapter
 
 logger = logging.getLogger(__name__)
@@ -34,11 +36,17 @@ class JoblyJobAdapter(JobSourceAdapter):
         if not source.url:
             raise ValueError(f"Source {source.slug!r} has no URL configured")
 
+        profile = resolve_http_profile(source, get_settings(), html=True)
+
         jobs: list[ScrapedJob] = []
         seen: set[str] = set()
-        async with html_session(headers=REQUEST_HEADERS) as session:
+        async with text_session(profile, headers=REQUEST_HEADERS) as session:
             for page in range(MAX_PAGES):
-                html = await fetch_text(_with_page(source.url, page), session=session)
+                html = await fetch_text(
+                    _with_page(source.url, page),
+                    session=session,
+                    profile=profile,
+                )
                 page_jobs = self._parse_page(html)
                 if not page_jobs:
                     break

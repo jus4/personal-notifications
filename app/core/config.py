@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     scrape_interval_seconds: int = 60 * 30
     scraper_user_agent: str = "notification-service/0.1"
     scraper_impersonate: str = "chrome"
+    scraper_html_user_agent: str | None = None
     scraper_proxy_url: str | None = None
     scraper_html_proxy_url: str | None = None
     scraper_timeout_seconds: float = 15.0

@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from app.scrapers import http
+from app.scrapers.config import ResolvedHttpProfile
 
 
 class FakeHttpxClient:
@@ -74,6 +75,7 @@ def settings(monkeypatch: pytest.MonkeyPatch) -> Any:
     class SettingsStub:
         scraper_user_agent = "test-agent"
         scraper_impersonate = "chrome"
+        scraper_html_user_agent = None
         scraper_proxy_url = None
         scraper_html_proxy_url = None
         scraper_timeout_seconds = 15.0
@@ -255,3 +257,81 @@ def test_fetch_text_without_proxies(
 
     assert asyncio.run(http.fetch_text("https://example.test/jobs")) == "ok"
     assert fake_html_session.instances[0].kwargs["proxies"] is None
+
+
+def test_fetch_text_disables_impersonation_with_minimal_headers(
+    fake_html_session: type[FakeAsyncSession],
+    settings: Any,
+) -> None:
+    settings.scraper_impersonate = ""
+    settings.scraper_html_user_agent = "curl/8.5.0"
+    fake_html_session.response_factory = lambda call, requested: FakeResponse(
+        200, text="ok"
+    )
+
+    assert (
+        asyncio.run(
+            http.fetch_text(
+                "https://example.test/jobs",
+                headers={"Referer": "https://www.jobly.fi/"},
+            )
+        )
+        == "ok"
+    )
+
+    session = fake_html_session.instances[0]
+    assert session.kwargs["impersonate"] is None
+    assert session.kwargs["headers"] == {
+        "Accept": "*/*",
+        "User-Agent": "curl/8.5.0",
+    }
+
+
+def test_fetch_text_plain_mode_falls_back_to_scraper_user_agent(
+    fake_html_session: type[FakeAsyncSession],
+    settings: Any,
+) -> None:
+    settings.scraper_impersonate = "none"
+    fake_html_session.response_factory = lambda call, requested: FakeResponse(
+        200, text="ok"
+    )
+
+    assert asyncio.run(http.fetch_text("https://example.test/jobs")) == "ok"
+
+    session = fake_html_session.instances[0]
+    assert session.kwargs["impersonate"] is None
+    assert session.kwargs["headers"]["User-Agent"] == "test-agent"
+
+
+def test_fetch_text_uses_explicit_profile(
+    fake_html_session: type[FakeAsyncSession],
+) -> None:
+    profile = ResolvedHttpProfile(
+        client="curl_cffi",
+        impersonate=None,
+        user_agent="curl/9.0.0",
+        proxy_url="http://profile-proxy.test:8080",
+        timeout_seconds=42.0,
+        http_version="v1.1",
+    )
+    fake_html_session.response_factory = lambda call, requested: FakeResponse(
+        200, text="ok"
+    )
+
+    assert (
+        asyncio.run(http.fetch_text("https://example.test/jobs", profile=profile))
+        == "ok"
+    )
+
+    session = fake_html_session.instances[0]
+    assert session.kwargs["impersonate"] is None
+    assert session.kwargs["timeout"] == 42.0
+    assert session.kwargs["http_version"] == "v1.1"
+    assert session.kwargs["proxies"] == {
+        "http": "http://profile-proxy.test:8080",
+        "https": "http://profile-proxy.test:8080",
+    }
+    assert session.kwargs["headers"] == {
+        "Accept": "*/*",
+        "User-Agent": "curl/9.0.0",
+    }
