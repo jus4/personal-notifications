@@ -277,7 +277,11 @@ class JobRepository:
 
     def dashboard_stats(self) -> DashboardStats:
         sources = list(
-            self.session.exec(select(Source).order_by(col(Source.slug))).all()
+            self.session.exec(
+                select(Source)
+                .where(col(Source.kind) == "jobs")
+                .order_by(col(Source.slug))
+            ).all()
         )
         rows = self.session.exec(
             select(

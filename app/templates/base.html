@@ -39,6 +39,12 @@
             >
               Jobs
             </a>
+            <a
+              href="/products"
+              class="rounded-lg px-3 py-2 font-medium transition {% if request.url.path.startswith('/products') %}bg-slate-800 text-white{% else %}text-slate-400 hover:text-white{% endif %}"
+            >
+              Products
+            </a>
           </nav>
         </div>
         <div class="flex items-center gap-4">

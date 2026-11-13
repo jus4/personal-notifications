@@ -72,6 +72,7 @@ def client(
 
     settings = get_settings()
     monkeypatch.setattr(settings, "scrape_interval_seconds", 0)
+    monkeypatch.setattr(settings, "product_scrape_interval_seconds", 0)
 
     app.dependency_overrides[get_session] = override_get_session
     app.dependency_overrides[get_session_factory] = override_get_session_factory

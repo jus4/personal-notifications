@@ -112,6 +112,53 @@ def test_sources_add_stores_scraper_config(
         assert source.config == {"http": {"impersonate": "none"}}
 
 
+def test_sources_add_accepts_product_source_without_url(
+    monkeypatch: Any,
+    engine: Engine,
+) -> None:
+    monkeypatch.setattr(cli, "engine", engine)
+
+    assert (
+        cli.main(
+            [
+                "sources",
+                "add",
+                "--slug",
+                "bergfreunde",
+                "--kind",
+                "products",
+                "--adapter",
+                "bergfreunde_html",
+            ]
+        )
+        == 0
+    )
+
+    with Session(engine) as session:
+        source = session.exec(select(Source).where(Source.slug == "bergfreunde")).one()
+        assert source.kind == "products"
+        assert source.url is None
+
+
+def test_sources_add_requires_url_for_jobs(
+    monkeypatch: Any,
+    engine: Engine,
+) -> None:
+    monkeypatch.setattr(cli, "engine", engine)
+
+    with pytest.raises(SystemExit):
+        cli.main(
+            [
+                "sources",
+                "add",
+                "--slug",
+                "duunitori",
+                "--adapter",
+                "duunitori_json",
+            ]
+        )
+
+
 def test_sources_add_rejects_invalid_scraper_config(
     monkeypatch: Any,
     engine: Engine,

@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     session_cookie_name: str = "notification_session"
     session_max_age: int = 60 * 60 * 24 * 30
     scrape_interval_seconds: int = 60 * 30
+    product_scrape_interval_seconds: int = 60 * 60 * 24
     scraper_user_agent: str = "notification-service/0.1"
     scraper_impersonate: str = "chrome"
     scraper_html_user_agent: str | None = None

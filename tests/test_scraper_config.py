@@ -110,3 +110,32 @@ def test_httpx_html_profile_disables_impersonation() -> None:
 def test_source_config_rejects_unknown_keys() -> None:
     with pytest.raises(ValidationError):
         SourceScraperConfig.model_validate({"http": {"unknown": True}})
+
+
+def test_product_profile_ignores_default_proxy() -> None:
+    source = _source()
+
+    profile = resolve_http_profile(
+        source,
+        SettingsStub(),
+        html=True,
+        allow_default_proxy=False,
+    )
+
+    assert profile.proxy_url is None
+
+
+def test_product_profile_uses_explicit_proxy_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PRODUCT_PROXY_URL", "http://product-proxy.test:9090")
+    source = _source({"http": {"proxy_env": "PRODUCT_PROXY_URL"}})
+
+    profile = resolve_http_profile(
+        source,
+        SettingsStub(),
+        html=True,
+        allow_default_proxy=False,
+    )
+
+    assert profile.proxy_url == "http://product-proxy.test:9090"

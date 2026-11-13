@@ -63,6 +63,26 @@ def test_dashboard_shows_job_and_source_stats(
     assert 'href="/jobs"' in response.text
 
 
+def test_dashboard_ignores_product_sources(
+    authenticated_client: TestClient,
+    session: Session,
+) -> None:
+    session.add(
+        Source(
+            slug="bergfreunde",
+            kind="products",
+            adapter="bergfreunde_html",
+            enabled=True,
+        )
+    )
+    session.commit()
+
+    response = authenticated_client.get("/")
+
+    assert response.status_code == 200
+    assert "bergfreunde" not in response.text
+
+
 def test_scrape_requires_authentication(client: TestClient) -> None:
     response = client.post("/scrape", follow_redirects=False)
 

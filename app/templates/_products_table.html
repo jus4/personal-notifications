@@ -1,0 +1,106 @@
+{% from "_time.html" import local_time %}
+
+<div class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
+  <div class="flex flex-col gap-1 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+    <p class="text-sm font-medium text-slate-200">
+      {{ page_result.total }} product{% if page_result.total != 1 %}s{% endif %}
+    </p>
+    {% if page_result.pages %}
+    <p class="text-xs text-slate-500">
+      Page {{ page_result.page }} of {{ page_result.pages }}
+    </p>
+    {% endif %}
+  </div>
+
+  {% if page_result.products %}
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
+      <thead class="bg-slate-950/60 text-xs uppercase tracking-wide text-slate-500">
+        <tr>
+          <th scope="col" class="px-5 py-3 font-medium">Product</th>
+          <th scope="col" class="px-5 py-3 font-medium">Sources</th>
+          <th scope="col" class="px-5 py-3 font-medium">Lowest price</th>
+          <th scope="col" class="px-5 py-3 font-medium">Last scraped</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-800/70">
+        {% for card in page_result.products %}
+        <tr class="align-top">
+          <td class="px-5 py-3">
+            <div class="flex items-center gap-3">
+              {% if card.image_url %}
+              <img
+                src="{{ card.image_url }}"
+                alt=""
+                class="h-12 w-12 rounded-lg border border-slate-800 object-cover"
+              />
+              {% else %}
+              <div class="flex h-12 w-12 items-center justify-center rounded-lg border border-slate-800 bg-slate-950 text-xs text-slate-600">
+                —
+              </div>
+              {% endif %}
+              <a
+                href="/products/{{ card.product.id }}"
+                class="font-medium text-slate-200 transition hover:text-sky-300"
+              >
+                {{ card.product.title }}
+              </a>
+            </div>
+          </td>
+          <td class="whitespace-nowrap px-5 py-3 text-slate-400">
+            {{ card.source_count }}
+          </td>
+          <td class="whitespace-nowrap px-5 py-3 text-slate-300">
+            {% if card.lowest_price is not none %}
+              {{ "%.2f"|format(card.lowest_price) }} {{ card.currency or "EUR" }}
+            {% else %}
+              <span class="text-slate-600">—</span>
+            {% endif %}
+          </td>
+          <td class="whitespace-nowrap px-5 py-3 text-slate-400">
+            {{ local_time(card.last_scraped_at) }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if page_result.has_previous or page_result.has_next %}
+  <div class="flex items-center justify-between gap-4 border-t border-slate-800 px-5 py-4">
+    {% if page_result.has_previous %}
+    {% set previous_url = request.url.include_query_params(page=page_result.previous_page) %}
+    <a
+      href="{{ previous_url }}"
+      hx-get="{{ previous_url }}"
+      hx-target="#products-results"
+      hx-push-url="true"
+      class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
+    >
+      Previous
+    </a>
+    {% else %}
+    <span></span>
+    {% endif %}
+
+    {% if page_result.has_next %}
+    {% set next_url = request.url.include_query_params(page=page_result.next_page) %}
+    <a
+      href="{{ next_url }}"
+      hx-get="{{ next_url }}"
+      hx-target="#products-results"
+      hx-push-url="true"
+      class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
+    >
+      Next
+    </a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% else %}
+  <p class="px-5 py-10 text-sm text-slate-400">
+    No products yet. Add a product above, then link shop offers to it.
+  </p>
+  {% endif %}
+</div>

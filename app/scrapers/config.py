@@ -87,9 +87,12 @@ def resolve_http_profile(
     settings: Settings,
     *,
     html: bool,
+    allow_default_proxy: bool = True,
 ) -> ResolvedHttpProfile:
     defaults = default_http_profile(settings, html=html)
     if source is None or not source.config:
+        if not allow_default_proxy:
+            defaults = defaults.model_copy(update={"proxy_url": None})
         return defaults
 
     config = SourceScraperConfig.model_validate(source.config)
@@ -118,8 +121,10 @@ def resolve_http_profile(
                 f"Proxy environment variable {http.proxy_env!r} is not set "
                 f"for source {source.slug!r}"
             )
-    else:
+    elif allow_default_proxy:
         proxy_url = _default_proxy_url(settings, html=html)
+    else:
+        proxy_url = None
 
     return ResolvedHttpProfile(
         client=client,

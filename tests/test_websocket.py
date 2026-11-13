@@ -94,9 +94,7 @@ def test_websocket_sends_backlog_on_first_connection(
         message = websocket.receive_json()
 
         assert message["type"] == "new_jobs"
-        assert [job["title"] for job in message["data"]["jobs"]] == [
-            "Old backlog job"
-        ]
+        assert [job["title"] for job in message["data"]["jobs"]] == ["Old backlog job"]
 
 
 def test_websocket_skips_old_backlog_for_returning_user(

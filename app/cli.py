@@ -13,11 +13,12 @@ from app.db.session import engine
 from app.models.common import utcnow
 from app.models.source import Source
 from app.scrapers.config import SourceScraperConfig
+from app.services.product_scrape import run_product_scrape
 from app.services.scrape import run_source
 
 logger = logging.getLogger(__name__)
 
-JOB_KINDS = ["jobs"]
+SOURCE_KINDS = ["jobs", "products"]
 
 
 def _absolute_http_url(value: str) -> str:
@@ -54,9 +55,9 @@ def build_parser() -> argparse.ArgumentParser:
         "add", help="Create or update a source by slug"
     )
     add_parser.add_argument("--slug", required=True)
-    add_parser.add_argument("--kind", default="jobs", choices=JOB_KINDS)
+    add_parser.add_argument("--kind", default="jobs", choices=SOURCE_KINDS)
     add_parser.add_argument("--adapter", required=True)
-    add_parser.add_argument("--url", required=True, type=_absolute_http_url)
+    add_parser.add_argument("--url", type=_absolute_http_url)
     add_parser.add_argument(
         "--config-json",
         type=_config_json,
@@ -69,16 +70,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     list_parser = source_subparsers.add_parser("list", help="List sources")
-    list_parser.add_argument("--kind", choices=JOB_KINDS)
+    list_parser.add_argument("--kind", choices=SOURCE_KINDS)
 
     scrape_parser = subparsers.add_parser("scrape", help="Run scrape sources")
     scrape_parser.add_argument("--source", dest="source_slug")
-    scrape_parser.add_argument("--kind", default="jobs", choices=JOB_KINDS)
+    scrape_parser.add_argument("--kind", default="jobs", choices=SOURCE_KINDS)
 
     return parser
 
 
 def _add_source(args: argparse.Namespace) -> int:
+    if args.kind == "jobs" and not args.url:
+        raise SystemExit("--url is required for job sources")
+
     with Session(engine) as session:
         source = session.exec(select(Source).where(Source.slug == args.slug)).first()
         now = utcnow()
@@ -129,7 +133,41 @@ def _list_sources(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _scrape_products(args: argparse.Namespace) -> int:
+    with Session(engine) as session:
+        try:
+            batch = await run_product_scrape(
+                session,
+                force=True,
+                source_slug=args.source_slug,
+            )
+        except Exception:
+            logger.exception("Product scrape failed")
+            return 1
+
+    if batch.source_count == 0:
+        logger.error("No enabled product sources matched")
+        return 1
+
+    for result in batch.results:
+        logger.info(
+            "Scraped products %s: links=%s updated=%s failed=%s",
+            result.source,
+            result.links,
+            result.updated,
+            result.failed,
+        )
+    for failure in batch.failures:
+        logger.error("Product scrape failed for %s: %s", failure.source, failure.error)
+
+    failed = bool(batch.failures) or any(result.failed for result in batch.results)
+    return 1 if failed else 0
+
+
 async def _scrape(args: argparse.Namespace) -> int:
+    if args.kind == "products":
+        return await _scrape_products(args)
+
     with Session(engine) as session:
         statement = select(Source).where(col(Source.enabled).is_(True))
         if args.source_slug:

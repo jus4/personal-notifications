@@ -6,7 +6,8 @@ from app.core.security import is_authenticated
 from app.core.templating import templates
 from app.db.session import SessionDep
 from app.services.jobs import JobRepository
-from app.services.notification_scheduler import scrape_and_notify, scrape_lock
+from app.services.notification_scheduler import scrape_and_notify
+from app.services.scrape_lock import scrape_lock
 
 router = APIRouter(tags=["dashboard"])
 

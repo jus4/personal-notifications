@@ -1,8 +1,8 @@
 # Notification Service
 
 A job and product data scraping service built with FastAPI, SQLModel, and
-Alembic. Scraping runs as a separate CLI/cron process so the API stays
-responsive and scrape failures cannot block requests.
+Alembic. Scraping can run from the CLI/cron or from in-process schedulers, and
+scrape failures are isolated per source.
 
 Sources are stored in the database. Site-specific extraction logic lives in
 Python adapters, so adding a new source means adding an adapter module and a
@@ -16,7 +16,10 @@ Python adapters, so adding a new source means adding an adapter module and a
 - JSON scraping via `httpx` and HTML scraping via `curl_cffi` (Chrome
   impersonation with BeautifulSoup) with timeouts and retries.
 - CLI for managing sources and running scrapes.
-- Product scraper scaffold for future HTML scraping.
+- Pluggable product source adapters with a Bergfreunde HTML adapter.
+- Canonical products linked to multiple shop-specific offers.
+- Daily product scraping plus a manual UI scrape button.
+- Shared scrape lock so job and product scrapes do not run concurrently.
 - Password-protected login with a reusable API-key dependency.
 - Frontpage dashboard with job/source stats and an on-demand scrape action.
 - Filterable jobs listing with title, source, link, posted, and scraped dates.
@@ -61,10 +64,12 @@ uv run alembic upgrade head
 | `SESSION_COOKIE_NAME` | `notification_session` | Name of the session cookie |
 | `SESSION_MAX_AGE` | `2592000` | Session lifetime in seconds (30 days) |
 | `SCRAPER_USER_AGENT` | `notification-service/0.1` | `User-Agent` header used for JSON scrape requests |
-| `SCRAPER_IMPERSONATE` | `chrome` | Browser TLS fingerprint impersonated for HTML scrape requests |
+| `SCRAPER_IMPERSONATE` | `chrome` | Browser TLS fingerprint impersonated for HTML scrape requests; empty disables impersonation |
+| `SCRAPER_HTML_USER_AGENT` | empty | `User-Agent` used for plain HTML requests (falls back to `SCRAPER_USER_AGENT`) |
 | `SCRAPER_PROXY_URL` | empty | Optional HTTP(S) proxy for all scrape requests |
 | `SCRAPER_HTML_PROXY_URL` | empty | Optional HTTP(S) proxy for HTML sources (falls back to `SCRAPER_PROXY_URL`) |
 | `SCRAPER_TIMEOUT_SECONDS` | `15` | Timeout for scrape requests in seconds |
+| `PRODUCT_SCRAPE_INTERVAL_SECONDS` | `86400` | Minimum age before a product offer is scraped again; `0` disables the product scheduler |
 
 `APP_PASSWORD` is required when `ENVIRONMENT=production`, and `SESSION_SECRET`
 must be changed from its development default.
@@ -97,12 +102,20 @@ After signing in, the navigation links to:
   enabled/disabled source breakdown, and a **Scrape jobs** button.
 - `/jobs` — paginated job listing with title, source, link, date posted, and
   date scraped. Filters cover title search, source, and posted-date range.
+- `/products` — canonical products with their lowest price, linked shop count,
+  last scrape time, and a **Scrape products** button.
+- `/products/{id}` — product detail with shop offers, prices, sizes,
+  availability, scrape errors, and forms to link or unlink shop offers.
 
 The **Scrape jobs** button runs all enabled `jobs` sources synchronously and
 shows per-source fetched/inserted/updated/skipped/failed counts, plus any source
 errors. The job link and posted date are read from each job's `raw_data`
 (`link`, `date_posted` with a `date_created` fallback), so no extra database
 columns are required.
+
+The **Scrape products** button force-scrapes all linked product offers. Job and
+product scrapes share an in-process lock: scheduled runs skip while another
+scrape is active, and manual runs wait for it to finish.
 
 Displayed timestamps are converted to the browser's local timezone. Without
 JavaScript they fall back to `Europe/Helsinki` (EET/EEST).
@@ -199,6 +212,44 @@ uv run python -m app.cli sources add \
   --url 'https://www.jobly.fi/tyopaikat/it?search=&job_geo_location=Uusimaa%2C%20Suomi&administrative_area_level_1=Uusimaa&lat=60.21872&lon=25.271621&country=Suomi&page=0'
 ```
 
+For products, a `Source` row represents a webshop. The shop base URL is
+optional; product URLs are linked per product in the UI.
+
+```bash
+uv run python -m app.cli sources add \
+  --slug bergfreunde \
+  --kind products \
+  --adapter bergfreunde_html \
+  --url 'https://www.bergfreunde.fi/' \
+  --config-json '{"http": {"impersonate": "chrome"}}'
+```
+
+Per-source scraper settings live in the `sources.config` JSON column:
+
+```bash
+uv run python -m app.cli sources add \
+  --slug jobly \
+  --kind jobs \
+  --adapter jobly_html \
+  --url '<jobly-url>' \
+  --config-json '{
+    "http": {
+      "client": "curl_cffi",
+      "impersonate": "none",
+      "user_agent": "curl/8.14.1",
+      "proxy_env": "SCRAPER_HTML_PROXY_URL",
+      "timeout_seconds": 30
+    }
+  }'
+```
+
+`config.http` overrides the global `SCRAPER_*` settings. Supported fields are
+`client` (`curl_cffi` or `httpx`), `impersonate` (`chrome`, `safari`, `none`),
+`user_agent`, `proxy_env`, `timeout_seconds`, and `http_version` (`v1.1` or
+`v2`). `proxy_env` names an environment variable containing the proxy URL so
+credentials are not stored in the database. If it is set but the variable is
+missing, the scrape fails with a clear error.
+
 List sources:
 
 ```bash
@@ -207,7 +258,7 @@ uv run python -m app.cli sources list --kind jobs
 ```
 
 `sources add` is create-or-update: running it again with the same slug updates
-the existing row.
+the existing row. Omit `--config-json` to keep an existing source's config.
 
 ## Run scraping
 
@@ -221,9 +272,10 @@ Run all enabled sources of a kind:
 
 ```bash
 uv run python -m app.cli scrape --kind jobs
+uv run python -m app.cli scrape --kind products
 ```
 
-Scrape behavior:
+Job scrape behavior:
 
 - Jobs are upserted on `(source, external_id)`.
 - Existing jobs have `title`, `raw_data`, and `scraped_at` updated.
@@ -236,14 +288,30 @@ Scrape behavior:
   body so blocked responses can be diagnosed from production logs.
 - `429` and `5xx` responses are retried; other `4xx` responses fail immediately.
 
+Product scrape behavior:
+
+- Each linked product URL is fetched by its shop adapter.
+- Price, currency, availability, image, sizes, raw data, and scraped time are
+  updated on the product-source link.
+- A failing offer records `last_error` and does not stop other offers.
+- The product scheduler skips offers scraped within
+  `PRODUCT_SCRAPE_INTERVAL_SECONDS` (default one day); the manual UI/CLI scrape
+  forces all linked offers.
+- Product adapters use no proxy unless that shop's Source config sets
+  `proxy_env`, keeping optional proxy usage to the shops that need it.
+
 ### Cron example
 
 ```cron
 */30 * * * * cd /path/to/notification-service && /usr/bin/env uv run python -m app.cli scrape --kind jobs >> /tmp/notification-scrape.log 2>&1
+0 6 * * * cd /path/to/notification-service && /usr/bin/env uv run python -m app.cli scrape --kind products >> /tmp/product-scrape.log 2>&1
 ```
 
-Scraping is intentionally separate from the FastAPI process. A future scheduler
-or worker can reuse `run_source` from `app/services/scrape.py`.
+The FastAPI process also runs in-process schedulers when
+`SCRAPE_INTERVAL_SECONDS` and `PRODUCT_SCRAPE_INTERVAL_SECONDS` are positive.
+Job and product scrapes share a lock, so scheduled runs skip and manual runs
+wait when another scrape is active. Keep the API at one instance so the lock
+remains effective.
 
 ## Tests and linting
 
@@ -264,9 +332,9 @@ app/
   api/          FastAPI routes
   core/         application settings
   db/           engine, session, and metadata
-  models/       Job and Source models
+  models/       Job, Source, Product, and ProductSource models
   scrapers/     adapter protocols, HTTP helper, registry, source adapters
-  services/     job upserts and scrape orchestration
+  services/     job/product repositories, scrape orchestration, schedulers
   cli.py        source management and scrape CLI
 migrations/     Alembic migrations
 tests/          unit and service tests
@@ -275,11 +343,9 @@ tests/          unit and service tests
 Scrape flow:
 
 ```text
-Source row
-  -> adapter registry
-  -> fetch and parse into ScrapedJob objects
-  -> JobRepository.upsert_many
-  -> jobs table
+Job:      Source row -> adapter registry -> ScrapedJob -> jobs table
+Product:  Source row + ProductSource URL -> adapter registry
+          -> ScrapedProduct -> product_sources table
 ```
 
 ### Database models
@@ -297,13 +363,43 @@ Source row
 `sources`:
 
 - `slug`
-- `kind`
+- `kind` (`jobs` or `products`)
 - `adapter`
 - `url`
 - `enabled`
 - `config`
 - `created_at`
 - `updated_at`
+
+For products, a Source is a webshop. Its `url` is optional because individual
+product URLs live on `product_sources`.
+
+`products`:
+
+- `title`
+- `image_url`
+- `created_at`
+- `updated_at`
+
+`product_sources`:
+
+- `product_id`
+- `source_id`
+- `url`
+- `external_id`
+- `title`
+- `image_url`
+- `price`
+- `currency`
+- `availability`
+- `sizes`
+- `raw_data`
+- `last_scraped_at`
+- `last_error`
+- `created_at`
+- `updated_at`
+
+`product_sources` has a unique constraint on `(source_id, url)`.
 
 ## Adding a new job source
 
@@ -339,8 +435,75 @@ Set `SCRAPER_HTML_PROXY_URL` to route HTML sources (currently Jobly) through a
 proxy while JSON sources stay direct. A sticky proxy is recommended so the
 Cloudflare clearance cookie remains valid across pages.
 
+To test a plain curl-like client, set `SCRAPER_IMPERSONATE=` (empty) and
+optionally `SCRAPER_HTML_USER_AGENT=curl/<version>`. In that mode HTML requests
+use libcurl's default fingerprint with minimal headers and no referer or
+`Sec-Fetch-*` headers.
+
 The shared HTTP helpers provide `fetch_json` (via `httpx`) and `fetch_text`
 (via `curl_cffi` with browser TLS/HTTP2 impersonation), both with timeouts and
 retries. Use `fetch_text` with BeautifulSoup for HTML sources. `fetch_text`
 accepts an optional `session` so an adapter can reuse one `curl_cffi` session
 across pages and keep cookies.
+
+## Product aggregation and linking
+
+A `Product` is the canonical product (for example La Sportiva Solution). Each
+`product_sources` row links that product to a shop-specific URL and stores the
+latest scraped price, sizes, availability, image, and raw data.
+
+The product UI supports:
+
+- creating canonical products with a title and optional image;
+- linking and unlinking shop product URLs;
+- viewing per-shop prices, sizes, availability, scrape times, and errors;
+- viewing the lowest linked price and the union of sizes for a product.
+
+Shop rows are managed with the CLI, for example:
+
+```bash
+uv run python -m app.cli sources add \
+  --slug bergfreunde \
+  --kind products \
+  --adapter bergfreunde_html \
+  --config-json '{"http": {"impersonate": "chrome"}}'
+```
+
+## Adding a new product source
+
+Product adapters live under `app/scrapers/products/<source>.py` and use the same
+registry pattern as job adapters. A product Source represents the webshop; the
+adapter receives that Source plus the specific product URL.
+
+1. Create a module under `app/scrapers/products/<source>.py`.
+2. Implement an adapter with a unique `key` and:
+
+   ```python
+   async def fetch(self, source: Source, url: str) -> list[ScrapedProduct]: ...
+   ```
+
+3. Register it with `@register_product_adapter`.
+4. Import the adapter in `app/scrapers/products/__init__.py` so it is
+   registered.
+5. Add fixture-based tests for the mapping logic.
+
+`ScrapedProduct` carries normalized `external_id`, `title`, `url`, `price`,
+`currency`, `availability`, `image_url`, and `sizes` fields. Site-specific
+details such as list price, stock text, ratings, and variant-level data stay in
+`raw_data`.
+
+Product adapters should resolve HTTP config with `allow_default_proxy=False` so
+a scrape uses no proxy unless the shop Source explicitly configures
+`config.http.proxy_env`.
+
+The `bergfreunde_html` adapter fetches product pages with `curl_cffi` Chrome
+impersonation (via `fetch_text` and `text_session`) and combines the page's
+JSON-LD `Product` data with its embedded `window.oBfArticle` variant payload.
+Bergfreunde is protected by Cloudflare, so browser impersonation must stay
+enabled (`SCRAPER_IMPERSONATE=chrome`) or be set per source with
+`{"http": {"impersonate": "chrome"}}`. Plain curl mode (`none`) is rejected with
+HTTP 403.
+
+Other webshop adapters (Varuste.net, Shop EpicTV, Partioaitta, Tradeinn, and
+Aminoporssi) are follow-up work. Product notifications and price history are
+not implemented yet.
