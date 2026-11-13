@@ -283,6 +283,20 @@ def test_jobs_page_paginates_results(
     assert "Page 2 of 2" in response.text
     assert "Job 01" in response.text
     assert "Job 30" not in response.text
+    assert 'href="/jobs?page=1"' in response.text
+    assert 'hx-get="/jobs?page=1"' in response.text
+    assert "http://testserver/jobs" not in response.text
+
+    response = authenticated_client.get("/jobs")
+
+    assert 'href="/jobs?page=2"' in response.text
+    assert 'hx-get="/jobs?page=2"' in response.text
+    assert "http://testserver/jobs" not in response.text
+
+    response = authenticated_client.get("/jobs", params={"q": "Job"})
+
+    assert 'href="/jobs?q=Job&amp;page=2"' in response.text
+    assert 'hx-get="/jobs?q=Job&amp;page=2"' in response.text
 
 
 def test_jobs_page_htmx_returns_table_partial(

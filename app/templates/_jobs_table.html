@@ -73,7 +73,7 @@
   {% if page_result.has_previous or page_result.has_next %}
   <div class="flex items-center justify-between gap-4 border-t border-slate-800 px-5 py-4">
     {% if page_result.has_previous %}
-    {% set previous_url = request.url.include_query_params(page=page_result.previous_page) %}
+    {% set previous_url = request.url.include_query_params(page=page_result.previous_page).replace(scheme='', netloc='') %}
     <a
       href="{{ previous_url }}"
       hx-get="{{ previous_url }}"
@@ -88,7 +88,7 @@
     {% endif %}
 
     {% if page_result.has_next %}
-    {% set next_url = request.url.include_query_params(page=page_result.next_page) %}
+    {% set next_url = request.url.include_query_params(page=page_result.next_page).replace(scheme='', netloc='') %}
     <a
       href="{{ next_url }}"
       hx-get="{{ next_url }}"
