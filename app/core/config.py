@@ -26,8 +26,6 @@ class Settings(BaseSettings):
     scraper_proxy_url: str | None = None
     scraper_html_proxy_url: str | None = None
     scraper_timeout_seconds: float = 15.0
-    websocket_job_limit: int = 10
-    websocket_backlog_limit: int = 100
     job_reshow_after_seconds: int = 60 * 30
     job_recency_days: int = 30
 

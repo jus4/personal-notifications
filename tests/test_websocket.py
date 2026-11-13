@@ -99,6 +99,75 @@ def test_websocket_sends_backlog_on_first_connection(
         ]
 
 
+def test_websocket_sends_all_backlog_on_first_connection(
+    session: Session,
+    client: TestClient,
+    app_password: None,
+) -> None:
+    session.add_all(
+        [
+            Job(external_id=str(index), source="test", title=f"Job {index}")
+            for index in range(105)
+        ]
+    )
+    session.commit()
+
+    with client.websocket_connect("/ws/1", headers=HEADERS) as websocket:
+        websocket.receive_json()
+        message = websocket.receive_json()
+
+        assert message["type"] == "new_jobs"
+        assert len(message["data"]["jobs"]) == 105
+        assert {job["title"] for job in message["data"]["jobs"]} == {
+            f"Job {index}" for index in range(105)
+        }
+
+
+def test_websocket_sends_all_recent_jobs_for_returning_user(
+    session: Session,
+    client: TestClient,
+    app_password: None,
+) -> None:
+    now = datetime.now(UTC)
+    history_job = Job(
+        external_id="history",
+        source="test",
+        title="History job",
+        raw_data={"date_posted": now.isoformat()},
+    )
+    recent_jobs = [
+        Job(
+            external_id=f"recent-{index}",
+            source="test",
+            title=f"Recent {index}",
+            raw_data={"date_posted": now.isoformat()},
+        )
+        for index in range(15)
+    ]
+    session.add_all([history_job, *recent_jobs])
+    session.commit()
+    assert history_job.id is not None
+    session.add(
+        UserJobDelivery(
+            user_id=1,
+            job_id=history_job.id,
+            sent_at=utcnow(),
+            shown_at=utcnow(),
+        )
+    )
+    session.commit()
+
+    with client.websocket_connect("/ws/1", headers=HEADERS) as websocket:
+        websocket.receive_json()
+        message = websocket.receive_json()
+
+        assert message["type"] == "new_jobs"
+        assert len(message["data"]["jobs"]) == 15
+        assert {job["title"] for job in message["data"]["jobs"]} == {
+            f"Recent {index}" for index in range(15)
+        }
+
+
 def test_websocket_skips_old_backlog_for_returning_user(
     session: Session,
     client: TestClient,
