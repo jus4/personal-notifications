@@ -84,9 +84,7 @@ def test_unread_jobs_respects_recency_window(session: Session) -> None:
     )
     session.commit()
 
-    unread = JobRepository(session).list_unread_jobs_for_user(
-        1, posted_within_days=30
-    )
+    unread = JobRepository(session).list_unread_jobs_for_user(1, posted_within_days=30)
 
     assert {job.external_id for job in unread} == {"recent"}
 

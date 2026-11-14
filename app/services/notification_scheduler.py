@@ -8,11 +8,10 @@ from app.db.session import engine
 from app.services.connections import manager
 from app.services.jobs import JobRepository, serialize_job
 from app.services.scrape import ScrapeBatchResult, run_enabled_sources
+from app.services.scrape_lock import scrape_lock
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-
-scrape_lock = asyncio.Lock()
 
 
 async def notify_connected_users(session: Session, job_ids: list[int]) -> None:

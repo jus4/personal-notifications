@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% from "_time.html" import local_time %}
+
+{% block title %}Sources · Notification Service{% endblock %}
+
+{% block main_class %}items-start justify-center{% endblock %}
+
+{% block content %}
+<div class="w-full max-w-6xl space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">Sources</h1>
+    <p class="mt-2 text-sm text-slate-400">
+      Manage job and product scrape sources.
+    </p>
+  </div>
+
+  {% if error %}
+  <div class="rounded-lg border border-red-900 bg-red-950/60 px-4 py-3 text-sm text-red-200">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  {% if saved %}
+  <div class="rounded-lg border border-emerald-900 bg-emerald-950/60 px-4 py-3 text-sm text-emerald-200">
+    Source "{{ saved }}" saved.
+  </div>
+  {% endif %}
+
+  {% if deleted %}
+  <div class="rounded-lg border border-emerald-900 bg-emerald-950/60 px-4 py-3 text-sm text-emerald-200">
+    Source "{{ deleted }}" deleted.
+  </div>
+  {% endif %}
+
+  <div class="rounded-2xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
+    <h2 class="text-sm font-semibold text-slate-200">
+      {% if is_edit %}Edit source{% else %}Add source{% endif %}
+    </h2>
+    <form action="/sources" method="post" class="mt-4 space-y-4">
+      {% if form.id %}
+      <input type="hidden" name="source_id" value="{{ form.id }}">
+      {% endif %}
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="slug" class="block text-sm font-medium text-slate-300">
+            Slug
+          </label>
+          <input
+            id="slug"
+            name="slug"
+            type="text"
+            required
+            maxlength="255"
+            value="{{ form.slug }}"
+            placeholder="bergfreunde"
+            class="mt-2 block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+          />
+        </div>
+
+        <div>
+          <label for="kind" class="block text-sm font-medium text-slate-300">
+            Kind
+          </label>
+          <select
+            id="kind"
+            name="kind"
+            class="mt-2 block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+          >
+            <option value="jobs" {% if form.kind == "jobs" %}selected{% endif %}>
+              Jobs
+            </option>
+            <option value="products" {% if form.kind == "products" %}selected{% endif %}>
+              Products
+            </option>
+          </select>
+        </div>
+
+        <div>
+          <label for="adapter" class="block text-sm font-medium text-slate-300">
+            Adapter
+          </label>
+          {% set known_adapters = job_adapters + product_adapters %}
+          <select
+            id="adapter"
+            name="adapter"
+            required
+            class="mt-2 block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+          >
+            <option value="" disabled {% if not form.adapter %}selected{% endif %}>
+              Select an adapter
+            </option>
+            {% if form.adapter and form.adapter not in known_adapters %}
+            <option value="{{ form.adapter }}" selected>
+              {{ form.adapter }} (unregistered)
+            </option>
+            {% endif %}
+            <optgroup label="Jobs">
+              {% for adapter in job_adapters %}
+              <option value="{{ adapter }}" {% if form.adapter == adapter %}selected{% endif %}>
+                {{ adapter }}
+              </option>
+              {% endfor %}
+            </optgroup>
+            <optgroup label="Products">
+              {% for adapter in product_adapters %}
+              <option value="{{ adapter }}" {% if form.adapter == adapter %}selected{% endif %}>
+                {{ adapter }}
+              </option>
+              {% endfor %}
+            </optgroup>
+          </select>
+        </div>
+
+        <div>
+          <label for="url" class="block text-sm font-medium text-slate-300">
+            URL
+          </label>
+          <input
+            id="url"
+            name="url"
+            type="url"
+            value="{{ form.url }}"
+            placeholder="https://example.com/"
+            class="mt-2 block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+          />
+          <p class="mt-1 text-xs text-slate-500">
+            Required for job sources. Optional for product shops.
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <label for="config_json" class="block text-sm font-medium text-slate-300">
+          Config JSON
+        </label>
+        <textarea
+          id="config_json"
+          name="config_json"
+          rows="5"
+          spellcheck="false"
+          placeholder='{"http": {"impersonate": "chrome"}}'
+          class="mt-2 block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+        >{{ form.config_json }}</textarea>
+        <p class="mt-1 text-xs text-slate-500">
+          Optional per-source scraper settings. Must be a JSON object.
+        </p>
+      </div>
+
+      <label class="flex items-center gap-3 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          name="enabled"
+          value="true"
+          {% if form.enabled %}checked{% endif %}
+          class="h-4 w-4 rounded border-slate-700 bg-slate-950 text-sky-600 focus:ring-sky-500/50"
+        />
+        Enabled
+      </label>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button
+          type="submit"
+          class="rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+        >
+          {% if is_edit %}Save changes{% else %}Add source{% endif %}
+        </button>
+        {% if is_edit %}
+        <a
+          href="/sources{% if kind %}?kind={{ kind }}{% endif %}"
+          class="rounded-lg border border-slate-700 px-4 py-2 font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
+        >
+          Cancel
+        </a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2">
+    <a
+      href="/sources"
+      class="rounded-lg px-3 py-2 text-sm font-medium transition {% if not kind %}bg-slate-800 text-white{% else %}text-slate-400 hover:text-white{% endif %}"
+    >
+      All
+    </a>
+    <a
+      href="/sources?kind=jobs"
+      class="rounded-lg px-3 py-2 text-sm font-medium transition {% if kind == 'jobs' %}bg-slate-800 text-white{% else %}text-slate-400 hover:text-white{% endif %}"
+    >
+      Jobs
+    </a>
+    <a
+      href="/sources?kind=products"
+      class="rounded-lg px-3 py-2 text-sm font-medium transition {% if kind == 'products' %}bg-slate-800 text-white{% else %}text-slate-400 hover:text-white{% endif %}"
+    >
+      Products
+    </a>
+  </div>
+
+  <div class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
+    <div class="flex flex-col gap-1 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <p class="text-sm font-medium text-slate-200">
+        {{ sources|length }} source{% if sources|length != 1 %}s{% endif %}
+      </p>
+    </div>
+
+    {% if sources %}
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
+        <thead class="bg-slate-950/60 text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th scope="col" class="px-5 py-3 font-medium">Slug</th>
+            <th scope="col" class="px-5 py-3 font-medium">Kind</th>
+            <th scope="col" class="px-5 py-3 font-medium">Adapter</th>
+            <th scope="col" class="px-5 py-3 font-medium">URL</th>
+            <th scope="col" class="px-5 py-3 font-medium">Status</th>
+            <th scope="col" class="px-5 py-3 font-medium">Updated</th>
+            <th scope="col" class="px-5 py-3 font-medium"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800/70">
+          {% for source in sources %}
+          <tr class="align-top">
+            <td class="whitespace-nowrap px-5 py-3 font-medium text-slate-200">
+              {{ source.slug }}
+            </td>
+            <td class="whitespace-nowrap px-5 py-3 text-slate-400">
+              {{ source.kind }}
+            </td>
+            <td class="whitespace-nowrap px-5 py-3 text-slate-400">
+              {{ source.adapter }}
+              {% if source.config %}
+              <span class="ml-2 rounded border border-slate-700 px-1.5 py-0.5 text-xs text-slate-400">
+                config
+              </span>
+              {% endif %}
+            </td>
+            <td class="px-5 py-3 text-slate-400">
+              {% if source.url %}
+              <span class="block max-w-xs truncate" title="{{ source.url }}">
+                {{ source.url }}
+              </span>
+              {% else %}
+              <span class="text-slate-600">—</span>
+              {% endif %}
+            </td>
+            <td class="whitespace-nowrap px-5 py-3">
+              {% if source.enabled %}
+              <span class="rounded-full border border-emerald-900 bg-emerald-950/60 px-2.5 py-1 text-xs font-medium text-emerald-300">
+                Enabled
+              </span>
+              {% else %}
+              <span class="rounded-full border border-slate-700 bg-slate-950 px-2.5 py-1 text-xs font-medium text-slate-400">
+                Disabled
+              </span>
+              {% endif %}
+            </td>
+            <td class="whitespace-nowrap px-5 py-3 text-slate-400">
+              {{ local_time(source.updated_at) }}
+            </td>
+            <td class="whitespace-nowrap px-5 py-3 text-right">
+              <div class="flex items-center justify-end gap-2">
+                <a
+                  href="/sources?edit={{ source.id }}{% if kind %}&kind={{ kind }}{% endif %}"
+                  class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
+                >
+                  Edit
+                </a>
+                <form
+                  action="/sources/{{ source.id }}/delete"
+                  method="post"
+                  onsubmit="return confirm('Delete source {{ source.slug }}?');"
+                >
+                  <button
+                    type="submit"
+                    class="rounded-lg border border-red-900 px-3 py-1.5 text-xs font-medium text-red-300 transition hover:border-red-700 hover:text-red-200"
+                  >
+                    Delete
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="px-5 py-10 text-sm text-slate-400">
+      No sources configured yet. Add one above.
+    </p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
