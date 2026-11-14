@@ -16,7 +16,10 @@ Python adapters, so adding a new source means adding an adapter module and a
 - JSON scraping via `httpx` and HTML scraping via `curl_cffi` (Chrome
   impersonation with BeautifulSoup) with timeouts and retries.
 - CLI for managing sources and running scrapes.
-- Pluggable product source adapters with a Bergfreunde HTML adapter.
+- Web UI for managing job and product sources.
+- Pluggable product source adapters with Bergfreunde HTML, Aminopörssi
+  Shopify, Tradeinn JSON-LD, Varuste HTML, Hardloop Next.js, and EpicTV
+  JSON-LD adapters.
 - Canonical products linked to multiple shop-specific offers.
 - Daily product scraping plus a manual UI scrape button.
 - Shared scrape lock so job and product scrapes do not run concurrently.
@@ -189,7 +192,12 @@ requires an external scheduler or an in-process scheduler.
 
 ## Manage sources
 
-Create or update a source by slug:
+Sources can also be managed from the web UI at `/sources`, linked in the header
+navigation. The page supports adding, editing, enabling/disabling, and deleting
+both job and product sources. Scraper config is entered as a JSON object in a
+text field. Deleting a source is blocked while product offers are linked to it.
+
+Create or update a source by slug with the CLI:
 
 ```bash
 uv run python -m app.cli sources add \
@@ -223,6 +231,63 @@ uv run python -m app.cli sources add \
   --url 'https://www.bergfreunde.fi/' \
   --config-json '{"http": {"impersonate": "chrome"}}'
 ```
+
+For a Shopify shop such as Aminopörssi:
+
+```bash
+uv run python -m app.cli sources add \
+  --slug aminoporssi \
+  --kind products \
+  --adapter aminoporssi_shopify \
+  --url 'https://www.aminoporssi.fi/'
+```
+
+For Tradeinn:
+
+```bash
+uv run python -m app.cli sources add \
+  --slug tradeinn \
+  --kind products \
+  --adapter tradeinn_html \
+  --url 'https://www.tradeinn.com/trekkinn/fi/'
+```
+
+Tradeinn product URLs should include the trailing `/p`. The adapter also
+normalizes URLs that end with the numeric product id by appending `/p` before
+fetching.
+
+For Varuste.net:
+
+```bash
+uv run python -m app.cli sources add \
+  --slug varuste \
+  --kind products \
+  --adapter varuste_html \
+  --url 'https://varuste.net/'
+```
+
+For Hardloop:
+
+```bash
+uv run python -m app.cli sources add \
+  --slug hardloop \
+  --kind products \
+  --adapter hardloop_html \
+  --url 'https://www.hardloop.fi/'
+```
+
+For EpicTV:
+
+```bash
+uv run python -m app.cli sources add \
+  --slug epictv \
+  --kind products \
+  --adapter epictv_html \
+  --url 'https://epictv.com/' \
+  --config-json '{"http": {"impersonate": "chrome"}}'
+```
+
+EpicTV is protected by Cloudflare, so Chrome impersonation is required.
 
 Per-source scraper settings live in the `sources.config` JSON column:
 
@@ -412,7 +477,7 @@ product URLs live on `product_sources`.
 
 3. Register it with `@register_job_adapter`.
 4. Import the adapter in `app/scrapers/jobs/__init__.py` so it is registered.
-5. Add the source row with `sources add`.
+5. Add the source row via the `/sources` page or `sources add`.
 6. Add fixture-based tests for the mapping logic.
 
 The `duunitori_json` adapter expects a JSON object with a `results` list. It
@@ -504,6 +569,32 @@ enabled (`SCRAPER_IMPERSONATE=chrome`) or be set per source with
 `{"http": {"impersonate": "chrome"}}`. Plain curl mode (`none`) is rejected with
 HTTP 403.
 
-Other webshop adapters (Varuste.net, Shop EpicTV, Partioaitta, Tradeinn, and
-Aminoporssi) are follow-up work. Product notifications and price history are
-not implemented yet.
+The `aminoporssi_shopify` adapter appends `.js` to the linked product URL and
+reads Shopify's product JSON endpoint. Prices are converted from cents to EUR,
+availability is taken from the product and variant `available` flags, sizes are
+read from Shopify size options, and variant details are stored in `raw_data`.
+
+The `tradeinn_html` adapter fetches the product page with `curl_cffi` and reads
+the JSON-LD `WebPage` → `mainEntity` `ProductGroup`. It uses the lowest variant
+offer price, aggregates variant availability, collects variant sizes, and
+stores per-size price, stock, GTIN, colour, and image details in `raw_data`.
+
+The `varuste_html` adapter fetches the product page with `curl_cffi` and reads
+the product microdata plus the main product form. It extracts the product id,
+title, price, currency, availability, image, selected colour, and size options.
+Per-size stock is not present in the initial HTML; product-level availability is
+stored and size option ids are kept in `raw_data`.
+
+The `hardloop_html` adapter reads the page's `__NEXT_DATA__` payload and its
+colour-reference API data. It uses the lowest variation price, derives product
+availability from per-size quantities, and stores colour, size, quantity,
+price, old price, reference, and per-size availability in `raw_data`.
+
+The `epictv_html` adapter fetches the product page with `curl_cffi` Chrome
+impersonation and reads the JSON-LD `ProductGroup`. It uses the lowest variant
+offer price, aggregates variant availability, collects variant sizes, and stores
+size, SKU, GTIN, price, currency, availability, image, and offer URL details in
+`raw_data`.
+
+Other webshop adapters (Partioaitta) are follow-up work. Product notifications
+and price history are not implemented yet.

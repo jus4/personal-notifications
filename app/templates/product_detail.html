@@ -118,8 +118,10 @@
     </form>
     {% else %}
     <p class="mt-3 text-sm text-slate-400">
-      No product shops configured. Add one with
-      <code class="rounded bg-slate-950 px-1.5 py-0.5 text-slate-300">python -m app.cli sources add --kind products ...</code>.
+      No product shops configured. Add one on the
+      <a href="/sources?kind=products" class="font-medium text-sky-400 transition hover:text-sky-300">
+        Sources page
+      </a>.
     </p>
     {% endif %}
   </div>
