@@ -1,7 +1,16 @@
 # Notification Service
 
-A personal project for data scraping web sources and notifications service.
+A personal project for data scraping web sources and notifications service. Scrapes jobs from few different sources and has notification service via websocket when new job entries are added to database. For products support is for few different webshops mainly for outdoor product shops. Actual products and product sources are still inserted manually but will implement LLM based implementation in the future.
 Build with FastAPI, SQLModel and Alembic.
+
+## Websocket client
+`scripts/notification-service.py` is a sample script for communication via websocket. Current notifications uses dunst but can be changed to any cli based notification.
+
+## Screenshots
+
+| Jobs | Products |
+| --- | --- |
+| ![Jobs page](screenshot_jobs.png) | ![Products page](screenshot_products.png) |
 
 ## Features
 - Job scaping support for duunitori and Jobly
