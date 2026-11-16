@@ -54,7 +54,6 @@ async def websocket_endpoint(
     try:
         while True:
             message = await websocket.receive_text()
-            print(message)
             await _handle_client_message(user_id, message, session_factory)
     except WebSocketDisconnect:
         manager.disconnect(user_id, websocket)
