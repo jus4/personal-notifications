@@ -1,11 +1,19 @@
+from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import delete
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, select
 
 from app import cli
+from app.models.category import Category
+from app.models.manufacturer import Manufacturer
+from app.models.product import Product
+from app.models.product_source import ProductSource
 from app.models.source import Source
+from app.services.product_snapshot import read_product_snapshot
 
 
 def test_sources_add_creates_and_updates(
@@ -180,3 +188,102 @@ def test_sources_add_rejects_invalid_scraper_config(
                 '{"http": {"unknown": true}}',
             ]
         )
+
+
+def test_products_export_and_ingest(
+    monkeypatch: Any,
+    engine: Engine,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(cli, "engine", engine)
+
+    with Session(engine) as session:
+        manufacturer = Manufacturer(name="La Sportiva", slug="la-sportiva")
+        category = Category(name="Climbing shoes", slug="climbing-shoes")
+        source = Source(
+            slug="bergfreunde",
+            kind="products",
+            adapter="bergfreunde_html",
+            enabled=True,
+        )
+        session.add(manufacturer)
+        session.add(category)
+        session.add(source)
+        session.commit()
+        session.refresh(manufacturer)
+        session.refresh(category)
+        session.refresh(source)
+
+        product = Product(
+            title="La Sportiva Solution",
+            manufacturer_id=manufacturer.id,
+            category_id=category.id,
+            image_url="https://cdn.example.test/solution.jpg",
+        )
+        session.add(product)
+        session.commit()
+        session.refresh(product)
+
+        session.add(
+            ProductSource(
+                product_id=product.id or 0,
+                source_id=source.id or 0,
+                url="https://www.bergfreunde.fi/solution/",
+                price=Decimal("99.90"),
+                currency="EUR",
+                sizes=["40"],
+            )
+        )
+        session.commit()
+
+    output = tmp_path / "snapshot.json"
+
+    assert (
+        cli.main(
+            [
+                "products",
+                "export",
+                "--source",
+                "bergfreunde",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+
+    snapshot = read_product_snapshot(output)
+    assert snapshot.schema_version == 3
+    assert snapshot.products[0].title == "La Sportiva Solution"
+    assert snapshot.products[0].category_slug == "climbing-shoes"
+    assert snapshot.products[0].offers[0].price == Decimal("99.90")
+
+    with Session(engine) as session:
+        session.execute(delete(ProductSource))
+        session.execute(delete(Product))
+        session.execute(delete(Manufacturer))
+        session.execute(delete(Category))
+        session.execute(delete(Source))
+        session.commit()
+
+    assert (
+        cli.main(
+            [
+                "products",
+                "ingest",
+                "--input",
+                str(output),
+            ]
+        )
+        == 0
+    )
+
+    with Session(engine) as session:
+        product = session.exec(select(Product)).one()
+        manufacturer = session.exec(select(Manufacturer)).one()
+        category = session.exec(select(Category)).one()
+        link = session.exec(select(ProductSource)).one()
+        assert product.title == "La Sportiva Solution"
+        assert product.manufacturer_id == manufacturer.id
+        assert product.category_id == category.id
+        assert link.price == Decimal("99.90")

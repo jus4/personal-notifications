@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -14,6 +15,12 @@ from app.models.common import utcnow
 from app.models.source import Source
 from app.scrapers.config import SourceScraperConfig
 from app.services.product_scrape import run_product_scrape
+from app.services.product_snapshot import (
+    export_product_snapshot,
+    ingest_product_snapshot,
+    read_product_snapshot,
+    write_product_snapshot,
+)
 from app.services.scrape import run_source
 
 logger = logging.getLogger(__name__)
@@ -76,6 +83,47 @@ def build_parser() -> argparse.ArgumentParser:
     scrape_parser.add_argument("--source", dest="source_slug")
     scrape_parser.add_argument("--kind", default="jobs", choices=SOURCE_KINDS)
 
+    products = subparsers.add_parser(
+        "products",
+        help="One-time product snapshot export and ingest tools",
+    )
+    product_subparsers = products.add_subparsers(
+        dest="products_command",
+        required=True,
+    )
+
+    export_parser = product_subparsers.add_parser(
+        "export",
+        help="Export local products to a JSON snapshot",
+    )
+    export_parser.add_argument(
+        "--source",
+        action="append",
+        dest="source_slugs",
+        help="Product source slug to export; may be repeated",
+    )
+    export_parser.add_argument(
+        "--manufacturer",
+        action="append",
+        help="Manufacturer slug to export; may be repeated",
+    )
+    export_parser.add_argument(
+        "--output",
+        type=Path,
+        help="Snapshot path (default: data/<source>_products.json)",
+    )
+
+    ingest_parser = product_subparsers.add_parser(
+        "ingest",
+        help="Apply a JSON snapshot to the database without scraping",
+    )
+    ingest_parser.add_argument("--input", type=Path, required=True)
+    ingest_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and plan the ingest, then roll back",
+    )
+
     return parser
 
 
@@ -130,6 +178,71 @@ def _list_sources(args: argparse.Namespace) -> int:
             f"enabled={source.enabled}\t{source.url or ''}"
         )
 
+    return 0
+
+
+def _export_products(args: argparse.Namespace) -> int:
+    source_slugs = args.source_slugs
+    if args.output is not None:
+        output = args.output
+    elif source_slugs is not None and len(source_slugs) == 1:
+        output = Path("data") / f"{source_slugs[0]}_products.json"
+    else:
+        output = Path("data") / "products_all_sources.json"
+
+    with Session(engine) as session:
+        try:
+            snapshot = export_product_snapshot(
+                session,
+                source_slugs=source_slugs,
+                manufacturer_slugs=args.manufacturer,
+            )
+        except Exception:
+            logger.exception("Product snapshot export failed")
+            return 1
+
+    write_product_snapshot(snapshot, output)
+    logger.info(
+        "Exported %s products and %s manufacturers from %s sources to %s",
+        len(snapshot.products),
+        len(snapshot.manufacturers),
+        len(snapshot.sources),
+        output,
+    )
+    return 0
+
+
+def _ingest_products(args: argparse.Namespace) -> int:
+    try:
+        snapshot = read_product_snapshot(args.input)
+    except Exception:
+        logger.exception("Could not read product snapshot %s", args.input)
+        return 1
+
+    with Session(engine) as session:
+        try:
+            report = ingest_product_snapshot(
+                session,
+                snapshot,
+                dry_run=args.dry_run,
+            )
+        except Exception:
+            logger.exception("Product snapshot ingest failed")
+            return 1
+
+    logger.info(
+        "Ingested snapshot%s: source_created=%s manufacturers_created=%s "
+        "categories_created=%s products_created=%s products_updated=%s "
+        "offers_created=%s offers_updated=%s",
+        " (dry run)" if report.dry_run else "",
+        report.source_created,
+        report.manufacturers_created,
+        report.categories_created,
+        report.products_created,
+        report.products_updated,
+        report.offers_created,
+        report.offers_updated,
+    )
     return 0
 
 
@@ -229,6 +342,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "scrape":
         return asyncio.run(_scrape(args))
+
+    if args.command == "products":
+        if args.products_command == "export":
+            return _export_products(args)
+        if args.products_command == "ingest":
+            return _ingest_products(args)
 
     parser.error("unknown command")
     return 2

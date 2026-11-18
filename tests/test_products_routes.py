@@ -4,6 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
+from app.models.category import Category
+from app.models.manufacturer import Manufacturer
 from app.models.product import Product
 from app.models.product_source import ProductSource
 from app.models.source import Source
@@ -63,6 +65,8 @@ def test_create_product_link_and_unlink(
     response = authenticated_client.get(f"/products/{product_id}")
     assert response.status_code == 200
     assert "La Sportiva Solution" in response.text
+    assert "Manufacturer:" in response.text
+    assert "Category:" in response.text
     assert "bergfreunde" in response.text
     assert url in response.text
     assert "Unlink" in response.text
@@ -107,8 +111,19 @@ def test_products_list_shows_offer_summary(
     session: Session,
 ) -> None:
     shop = _shop(session)
+    manufacturer = Manufacturer(name="La Sportiva", slug="la-sportiva")
+    category = Category(name="Climbing shoes", slug="climbing-shoes")
+    session.add(manufacturer)
+    session.add(category)
+    session.commit()
+    session.refresh(manufacturer)
+    session.refresh(category)
     repository = ProductRepository(session)
-    product = repository.create_product(title="La Sportiva Solution")
+    product = repository.create_product(
+        title="La Sportiva Solution",
+        manufacturer_id=manufacturer.id,
+        category_id=category.id,
+    )
     link = repository.add_product_source(
         product_id=product.id or 0,
         source_id=shop.id or 0,
@@ -131,6 +146,10 @@ def test_products_list_shows_offer_summary(
 
     assert response.status_code == 200
     assert "La Sportiva Solution" in response.text
+    assert "Manufacturer" in response.text
+    assert "Category" in response.text
+    assert "La Sportiva" in response.text
+    assert "Climbing shoes" in response.text
     assert "99.90" in response.text
     assert "bergfreunde" not in response.text
     assert "Scrape products" in response.text

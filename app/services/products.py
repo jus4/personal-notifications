@@ -5,7 +5,9 @@ from decimal import Decimal
 from sqlalchemy import func
 from sqlmodel import Session, col, or_, select
 
+from app.models.category import Category
 from app.models.common import utcnow
+from app.models.manufacturer import Manufacturer
 from app.models.product import Product
 from app.models.product_source import ProductSource
 from app.models.source import Source
@@ -21,6 +23,8 @@ class ProductCard:
     currency: str | None
     last_scraped_at: datetime | None
     image_url: str | None
+    manufacturer: Manufacturer | None
+    category: Category | None
 
 
 @dataclass(slots=True)
@@ -63,6 +67,8 @@ class ProductDetail:
     currency: str | None
     last_scraped_at: datetime | None
     image_url: str | None
+    manufacturer: Manufacturer | None
+    category: Category | None
 
 
 class ProductRepository:
@@ -85,12 +91,22 @@ class ProductRepository:
                 func.max(col(ProductSource.currency)),
                 func.max(col(ProductSource.last_scraped_at)),
                 func.max(col(ProductSource.image_url)),
+                Manufacturer,
+                Category,
             )
             .outerjoin(
                 ProductSource,
                 col(ProductSource.product_id) == col(Product.id),
             )
-            .group_by(col(Product.id))
+            .outerjoin(
+                Manufacturer,
+                col(Product.manufacturer_id) == col(Manufacturer.id),
+            )
+            .outerjoin(
+                Category,
+                col(Product.category_id) == col(Category.id),
+            )
+            .group_by(col(Product.id), col(Manufacturer.id), col(Category.id))
             .order_by(col(Product.updated_at).desc(), col(Product.id).desc())
         )
         if q:
@@ -113,6 +129,8 @@ class ProductRepository:
                 currency=row[3],
                 last_scraped_at=row[4],
                 image_url=row[0].image_url or row[5],
+                manufacturer=row[6],
+                category=row[7],
             )
             for row in rows
         ]
@@ -127,6 +145,16 @@ class ProductRepository:
 
     def get_product(self, product_id: int) -> Product | None:
         return self.session.get(Product, product_id)
+
+    def get_manufacturer(self, manufacturer_id: int | None) -> Manufacturer | None:
+        if manufacturer_id is None:
+            return None
+        return self.session.get(Manufacturer, manufacturer_id)
+
+    def get_category(self, category_id: int | None) -> Category | None:
+        if category_id is None:
+            return None
+        return self.session.get(Category, category_id)
 
     def get_product_detail(self, product_id: int) -> ProductDetail | None:
         product = self.get_product(product_id)
@@ -167,6 +195,8 @@ class ProductRepository:
             ),
             last_scraped_at=max(scraped_times) if scraped_times else None,
             image_url=image_url,
+            manufacturer=self.get_manufacturer(product.manufacturer_id),
+            category=self.get_category(product.category_id),
         )
 
     def list_product_sources(self, product_id: int) -> list[ProductSourceView]:
@@ -180,6 +210,33 @@ class ProductRepository:
             ProductSourceView(link=row[0], source=row[1])
             for row in self.session.exec(statement).all()
         ]
+
+    def list_export_rows(
+        self,
+        source_id: int,
+        *,
+        manufacturer_slugs: list[str] | None = None,
+    ) -> list[tuple[Product, Manufacturer | None, Category | None, ProductSource]]:
+        statement = (
+            select(Product, Manufacturer, Category, ProductSource)
+            .join(
+                ProductSource,
+                col(ProductSource.product_id) == col(Product.id),
+            )
+            .outerjoin(
+                Manufacturer,
+                col(Product.manufacturer_id) == col(Manufacturer.id),
+            )
+            .outerjoin(
+                Category,
+                col(Product.category_id) == col(Category.id),
+            )
+            .where(col(ProductSource.source_id) == source_id)
+            .order_by(col(Product.id), col(ProductSource.id))
+        )
+        if manufacturer_slugs:
+            statement = statement.where(col(Manufacturer.slug).in_(manufacturer_slugs))
+        return [tuple(row) for row in self.session.exec(statement).all()]
 
     def list_product_shops(self, *, enabled_only: bool = True) -> list[Source]:
         statement = select(Source).where(col(Source.kind) == "products")
@@ -207,16 +264,32 @@ class ProductRepository:
         statement = statement.order_by(col(ProductSource.id))
         return list(self.session.exec(statement).all())
 
-    def create_product(self, *, title: str, image_url: str | None = None) -> Product:
+    def create_product(
+        self,
+        *,
+        title: str,
+        image_url: str | None = None,
+        manufacturer_id: int | None = None,
+        category_id: int | None = None,
+    ) -> Product:
         cleaned_title = title.strip()
         if not cleaned_title:
             raise ValueError("Product title is required")
         cleaned_image = _clean_optional(image_url)
+        if (
+            manufacturer_id is not None
+            and self.get_manufacturer(manufacturer_id) is None
+        ):
+            raise ValueError("Manufacturer not found")
+        if category_id is not None and self.get_category(category_id) is None:
+            raise ValueError("Category not found")
 
         now = utcnow()
         product = Product(
             title=cleaned_title,
             image_url=cleaned_image,
+            manufacturer_id=manufacturer_id,
+            category_id=category_id,
             created_at=now,
             updated_at=now,
         )

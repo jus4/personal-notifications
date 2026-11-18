@@ -4,6 +4,8 @@ from decimal import Decimal
 import pytest
 from sqlmodel import Session, select
 
+from app.models.category import Category
+from app.models.manufacturer import Manufacturer
 from app.models.product import Product
 from app.models.product_source import ProductSource
 from app.models.source import Source
@@ -22,6 +24,22 @@ def _shop(session: Session, slug: str = "bergfreunde") -> Source:
     session.commit()
     session.refresh(source)
     return source
+
+
+def _manufacturer(session: Session) -> Manufacturer:
+    manufacturer = Manufacturer(name="La Sportiva", slug="la-sportiva")
+    session.add(manufacturer)
+    session.commit()
+    session.refresh(manufacturer)
+    return manufacturer
+
+
+def _category(session: Session) -> Category:
+    category = Category(name="Climbing shoes", slug="climbing-shoes")
+    session.add(category)
+    session.commit()
+    session.refresh(category)
+    return category
 
 
 def test_create_product_requires_title(session: Session) -> None:
@@ -157,3 +175,47 @@ def test_remove_product_source(session: Session) -> None:
     )
     assert session.exec(select(ProductSource)).all() == []
     assert session.exec(select(Product)).all() != []
+
+
+def test_manufacturer_and_category_are_exposed_in_list_and_detail(
+    session: Session,
+) -> None:
+    repository = ProductRepository(session)
+    manufacturer = _manufacturer(session)
+    category = _category(session)
+    product = repository.create_product(
+        title="La Sportiva Solution",
+        manufacturer_id=manufacturer.id,
+        category_id=category.id,
+    )
+    shop = _shop(session)
+    repository.add_product_source(
+        product_id=product.id or 0,
+        source_id=shop.id or 0,
+        url="https://example.test/solution",
+    )
+
+    page = repository.list_products()
+    detail = repository.get_product_detail(product.id or 0)
+
+    assert page.products[0].manufacturer == manufacturer
+    assert page.products[0].category == category
+    assert detail is not None
+    assert detail.manufacturer == manufacturer
+    assert detail.category == category
+
+
+def test_create_product_rejects_unknown_manufacturer(session: Session) -> None:
+    with pytest.raises(ValueError, match="Manufacturer not found"):
+        ProductRepository(session).create_product(
+            title="Solution",
+            manufacturer_id=999,
+        )
+
+
+def test_create_product_rejects_unknown_category(session: Session) -> None:
+    with pytest.raises(ValueError, match="Category not found"):
+        ProductRepository(session).create_product(
+            title="Solution",
+            category_id=999,
+        )

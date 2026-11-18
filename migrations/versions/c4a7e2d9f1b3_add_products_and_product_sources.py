@@ -24,7 +24,9 @@ def upgrade() -> None:
     op.create_table(
         "products",
         sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("title", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
+        sa.Column(
+            "title", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False
+        ),
         sa.Column("image_url", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
