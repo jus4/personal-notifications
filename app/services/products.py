@@ -3,6 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, or_, select
 
 from app.models.category import Category
@@ -56,6 +57,13 @@ class ProductPage:
 class ProductSourceView:
     link: ProductSource
     source: Source
+
+
+@dataclass(slots=True)
+class ProductSourceRow:
+    link: ProductSource
+    source: Source
+    product: Product
 
 
 @dataclass(slots=True)
@@ -210,6 +218,75 @@ class ProductRepository:
             ProductSourceView(link=row[0], source=row[1])
             for row in self.session.exec(statement).all()
         ]
+
+    def list_product_source_rows(
+        self,
+        *,
+        show_all: bool = False,
+    ) -> list[ProductSourceRow]:
+        statement = (
+            select(ProductSource, Source, Product)
+            .join(Source, col(ProductSource.source_id) == col(Source.id))
+            .join(Product, col(ProductSource.product_id) == col(Product.id))
+            .order_by(
+                col(Product.title),
+                col(Source.slug),
+                col(ProductSource.id),
+            )
+        )
+        if not show_all:
+            statement = statement.where(col(ProductSource.last_error).is_not(None))
+        return [
+            ProductSourceRow(link=row[0], source=row[1], product=row[2])
+            for row in self.session.exec(statement).all()
+        ]
+
+    def get_product_source_row(self, link_id: int) -> ProductSourceRow | None:
+        statement = (
+            select(ProductSource, Source, Product)
+            .join(Source, col(ProductSource.source_id) == col(Source.id))
+            .join(Product, col(ProductSource.product_id) == col(Product.id))
+            .where(col(ProductSource.id) == link_id)
+        )
+        row = self.session.exec(statement).first()
+        if row is None:
+            return None
+        return ProductSourceRow(link=row[0], source=row[1], product=row[2])
+
+    def update_product_source_url(
+        self,
+        *,
+        link_id: int,
+        url: str,
+    ) -> ProductSource:
+        cleaned_url = url.strip()
+        validate_url(cleaned_url)
+
+        link = self.session.get(ProductSource, link_id)
+        if link is None:
+            raise ValueError("Product source not found")
+
+        existing = self.session.exec(
+            select(ProductSource).where(
+                col(ProductSource.source_id) == link.source_id,
+                col(ProductSource.url) == cleaned_url,
+                col(ProductSource.id) != link.id,
+            )
+        ).first()
+        if existing is not None:
+            raise ValueError("This URL is already linked to another product")
+
+        link.url = cleaned_url
+        link.last_error = None
+        link.updated_at = utcnow()
+        self.session.add(link)
+        try:
+            self.session.commit()
+        except IntegrityError as exc:
+            self.session.rollback()
+            raise ValueError("This URL is already linked to another product") from exc
+        self.session.refresh(link)
+        return link
 
     def list_export_rows(
         self,

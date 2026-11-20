@@ -1,14 +1,18 @@
 import logging
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 
 from sqlmodel import Session, col, select
 
 from app.core.config import get_settings
 from app.models.common import utcnow
+from app.models.product import Product
 from app.models.product_source import ProductSource
 from app.models.source import Source
-from app.scrapers.base import ProductSourceAdapter
+from app.scrapers.base import ProductSourceAdapter, ScrapedProduct
 from app.scrapers.registry import PRODUCT_ADAPTERS
 from app.services.products import ProductRepository
 
@@ -35,6 +39,76 @@ class ProductScrapeBatchResult:
     results: list[ProductScrapeResult] = field(default_factory=list)
     failures: list[ProductScrapeFailure] = field(default_factory=list)
     source_count: int = 0
+
+
+@dataclass(slots=True)
+class ProductMatchResult:
+    matched: bool
+    reason: str
+
+
+def get_product_adapter(source: Source) -> ProductSourceAdapter:
+    adapter_cls = PRODUCT_ADAPTERS.get(source.adapter)
+    if adapter_cls is None:
+        raise ValueError(
+            f"No product adapter registered for {source.adapter!r} "
+            f"(source {source.slug!r})"
+        )
+    return adapter_cls()
+
+
+async def fetch_product_preview(source: Source, url: str) -> ScrapedProduct:
+    adapter = get_product_adapter(source)
+    products = await adapter.fetch(source, url)
+    if not products:
+        raise ValueError("Adapter returned no products")
+    if len(products) > 1:
+        logger.warning(
+            "Product adapter %s returned %s products for %s; using the first",
+            source.adapter,
+            len(products),
+            url,
+        )
+    return products[0]
+
+
+def compare_scraped_product(
+    product: Product,
+    link: ProductSource,
+    scraped: ScrapedProduct,
+) -> ProductMatchResult:
+    existing_external_id = (link.external_id or "").strip()
+    scraped_external_id = (scraped.external_id or "").strip()
+    if existing_external_id and existing_external_id == scraped_external_id:
+        return ProductMatchResult(matched=True, reason="external_id")
+
+    if _titles_match(product.title, scraped.title):
+        return ProductMatchResult(matched=True, reason="title")
+
+    return ProductMatchResult(matched=False, reason="mismatch")
+
+
+def _normalize_title(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    normalized = "".join(
+        character for character in normalized if not unicodedata.combining(character)
+    )
+    normalized = re.sub(r"[^0-9a-z]+", " ", normalized.casefold())
+    return " ".join(normalized.split())
+
+
+def _titles_match(linked_title: str, scraped_title: str) -> bool:
+    linked = _normalize_title(linked_title)
+    scraped = _normalize_title(scraped_title)
+    if not linked or not scraped:
+        return False
+
+    linked_tokens = linked.split()
+    scraped_tokens = set(scraped.split())
+    if all(token in scraped_tokens for token in linked_tokens):
+        return True
+
+    return SequenceMatcher(None, linked, scraped).ratio() >= 0.8
 
 
 async def run_product_source(

@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% from "_time.html" import local_time %}
+
+{% block title %}Product sources · Notification Service{% endblock %}
+
+{% block main_class %}items-start justify-center{% endblock %}
+
+{% block content %}
+<div class="w-full max-w-6xl space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">Product sources</h1>
+    <p class="mt-2 text-sm text-slate-400">
+      Review failed product offers, fix their URLs, and test them before saving.
+    </p>
+  </div>
+
+  {% if error %}
+  <div class="rounded-lg border border-red-900 bg-red-950/60 px-4 py-3 text-sm text-red-200">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  {% if saved %}
+  <div class="rounded-lg border border-emerald-900 bg-emerald-950/60 px-4 py-3 text-sm text-emerald-200">
+    Product source saved.
+  </div>
+  {% endif %}
+
+  <div class="flex flex-wrap items-center gap-2">
+    <a
+      href="/product-sources"
+      class="rounded-lg px-3 py-2 text-sm font-medium transition {% if not show_all %}bg-slate-800 text-white{% else %}text-slate-400 hover:text-white{% endif %}"
+    >
+      Errors only
+    </a>
+    <a
+      href="/product-sources?show_all=1"
+      class="rounded-lg px-3 py-2 text-sm font-medium transition {% if show_all %}bg-slate-800 text-white{% else %}text-slate-400 hover:text-white{% endif %}"
+    >
+      Show all
+    </a>
+  </div>
+
+  <div class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
+    <div class="flex flex-col gap-1 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <p class="text-sm font-medium text-slate-200">
+        {{ rows|length }} product source{% if rows|length != 1 %}s{% endif %}
+      </p>
+      {% if not show_all %}
+      <p class="text-xs text-slate-500">Only sources with a last_error are shown.</p>
+      {% endif %}
+    </div>
+
+    {% if rows %}
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-800 text-left text-sm">
+        <thead class="bg-slate-950/60 text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th scope="col" class="px-5 py-3 font-medium">Product</th>
+            <th scope="col" class="px-5 py-3 font-medium">Shop</th>
+            <th scope="col" class="px-5 py-3 font-medium">Current URL</th>
+            <th scope="col" class="px-5 py-3 font-medium">Last error</th>
+            <th scope="col" class="px-5 py-3 font-medium">Change URL</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800/70">
+          {% for row in rows %}
+          <tr class="align-top">
+            <td class="px-5 py-3">
+              <a
+                href="/products/{{ row.product.id }}"
+                class="font-medium text-slate-200 transition hover:text-sky-300"
+              >
+                {{ row.product.title }}
+              </a>
+              {% if row.link.title %}
+              <p class="mt-1 text-xs text-slate-500">
+                Scraped as: {{ row.link.title }}
+              </p>
+              {% endif %}
+            </td>
+            <td class="whitespace-nowrap px-5 py-3 text-slate-400">
+              {{ row.source.slug }}
+            </td>
+            <td class="max-w-sm px-5 py-3">
+              <a
+                href="{{ row.link.url }}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="block truncate text-slate-300 transition hover:text-sky-300"
+                title="{{ row.link.url }}"
+              >
+                {{ row.link.url }}
+              </a>
+              <p class="mt-1 text-xs text-slate-500">
+                Last scraped: {{ local_time(row.link.last_scraped_at) }}
+              </p>
+            </td>
+            <td class="max-w-sm px-5 py-3">
+              {% if row.link.last_error %}
+              <p class="rounded-lg border border-red-900 bg-red-950/60 px-2 py-1 text-xs text-red-200">
+                {{ row.link.last_error }}
+              </p>
+              {% else %}
+              <span class="text-slate-600">—</span>
+              {% endif %}
+            </td>
+            <td class="min-w-80 px-5 py-3">
+              <form
+                action="/product-sources/{{ row.link.id }}/url"
+                method="post"
+                class="space-y-2"
+              >
+                <input
+                  name="url"
+                  type="url"
+                  required
+                  value="{{ row.link.url }}"
+                  class="block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+                />
+                <div class="flex flex-wrap items-center gap-2">
+                  <button
+                    type="submit"
+                    class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                  >
+                    Save URL
+                  </button>
+                  <button
+                    type="button"
+                    hx-post="/product-sources/{{ row.link.id }}/test"
+                    hx-include="closest form"
+                    hx-target="#test-result-{{ row.link.id }}"
+                    hx-swap="innerHTML"
+                    hx-disabled-elt="this"
+                    class="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    Test URL
+                  </button>
+                </div>
+                <div
+                  id="test-result-{{ row.link.id }}"
+                  class="empty:hidden"
+                >
+                  {% if test_row_id == row.link.id %}
+                    {% include "_product_source_test_result.html" %}
+                  {% endif %}
+                </div>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% elif show_all %}
+    <p class="px-5 py-10 text-sm text-slate-400">
+      No product sources are linked yet.
+    </p>
+    {% else %}
+    <p class="px-5 py-10 text-sm text-slate-400">
+      No product source errors. Use “Show all” to review every linked source.
+    </p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
