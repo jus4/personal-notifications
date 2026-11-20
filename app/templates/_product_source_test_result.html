@@ -1,0 +1,47 @@
+{% if error %}
+<div class="rounded-lg border border-red-900 bg-red-950/60 px-3 py-2 text-xs text-red-200">
+  {{ error }}
+</div>
+{% elif match %}
+<div class="space-y-2">
+  {% if match.matched %}
+  <p class="rounded-lg border border-emerald-900 bg-emerald-950/60 px-3 py-2 text-xs font-medium text-emerald-200">
+    Matched via {% if match.reason == "external_id" %}external ID{% else %}title{% endif %}
+  </p>
+  {% else %}
+  <p class="rounded-lg border border-amber-900 bg-amber-950/60 px-3 py-2 text-xs font-medium text-amber-200">
+    Scraped product does not match the linked product.
+  </p>
+  {% endif %}
+
+  <div class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-300">
+    <div class="flex items-start gap-3">
+      {% if scraped.image_url %}
+      <img
+        src="{{ scraped.image_url }}"
+        alt=""
+        class="h-12 w-12 rounded border border-slate-800 object-cover"
+      />
+      {% endif %}
+      <div class="min-w-0 space-y-1">
+        <p class="font-medium text-slate-200">{{ scraped.title }}</p>
+        {% if scraped.external_id %}
+        <p>External ID: {{ scraped.external_id }}</p>
+        {% endif %}
+        <p>
+          Price:
+          {% if scraped.price is not none %}
+            {{ "%.2f"|format(scraped.price) }} {{ scraped.currency or "EUR" }}
+          {% else %}
+            —
+          {% endif %}
+        </p>
+        <p>Availability: {{ scraped.availability or "—" }}</p>
+        {% if url %}
+        <p class="break-all text-slate-500">URL: {{ url }}</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}

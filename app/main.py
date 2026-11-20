@@ -8,6 +8,7 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
+from app.api.routes.product_sources import router as product_sources_router
 from app.api.routes.products import router as products_router
 from app.api.routes.sources import router as sources_router
 from app.api.routes.websocket import router as websocket_router
@@ -59,5 +60,6 @@ app.include_router(health_router)
 app.include_router(dashboard_router)
 app.include_router(jobs_router)
 app.include_router(products_router)
+app.include_router(product_sources_router)
 app.include_router(sources_router)
 app.include_router(websocket_router)
