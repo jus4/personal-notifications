@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from typing import Any
 
 from app.models.source import Source
@@ -23,12 +24,16 @@ def test_fetch_maps_duunitori_results(monkeypatch: Any) -> None:
                 "heading": "Integraatiokehittäjä",
                 "short_heading": "",
                 "company_name": "Devikone Oy",
+                "date_posted": "2026-11-04T16:15:46+02:00",
+                "date_created": "2026-09-08T18:02:56+03:00",
             },
             {
                 "id": 20704750,
                 "heading": "",
                 "short_heading": "Ohjelmistokehittäjä",
                 "company_name": "Rossum Oy",
+                "date_posted": "2026-11-03T00:00:01+02:00",
+                "date_created": "2026-09-29T18:15:36+03:00",
             },
         ],
     }
@@ -48,6 +53,8 @@ def test_fetch_maps_duunitori_results(monkeypatch: Any) -> None:
     ]
     assert jobs[0].raw_data == payload["results"][0]
     assert jobs[1].raw_data == payload["results"][1]
+    assert jobs[0].date_posted == datetime.fromisoformat("2026-11-04T14:15:46+00:00")
+    assert jobs[1].date_posted == datetime.fromisoformat("2026-11-02T22:00:01+00:00")
 
 
 def test_fetch_skips_invalid_and_duplicate_entries(monkeypatch: Any) -> None:

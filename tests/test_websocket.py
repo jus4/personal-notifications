@@ -81,7 +81,7 @@ def test_websocket_sends_backlog_on_first_connection(
             external_id="old",
             source="test",
             title="Old backlog job",
-            raw_data={"date_posted": "2020-01-01T00:00:00+00:00"},
+            date_posted=datetime(2020, 1, 1, tzinfo=UTC),
         )
     )
     session.commit()
@@ -131,14 +131,14 @@ def test_websocket_sends_all_recent_jobs_for_returning_user(
         external_id="history",
         source="test",
         title="History job",
-        raw_data={"date_posted": now.isoformat()},
+        date_posted=now,
     )
     recent_jobs = [
         Job(
             external_id=f"recent-{index}",
             source="test",
             title=f"Recent {index}",
-            raw_data={"date_posted": now.isoformat()},
+            date_posted=now,
         )
         for index in range(15)
     ]
@@ -176,13 +176,13 @@ def test_websocket_skips_old_backlog_for_returning_user(
         external_id="old",
         source="test",
         title="Old job",
-        raw_data={"date_posted": (now - timedelta(days=40)).isoformat()},
+        date_posted=now - timedelta(days=40),
     )
     recent_job = Job(
         external_id="recent",
         source="test",
         title="Recent job",
-        raw_data={"date_posted": now.isoformat()},
+        date_posted=now,
     )
     session.add_all([old_job, recent_job])
     session.commit()

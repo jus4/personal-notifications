@@ -1,11 +1,12 @@
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
-from sqlalchemy import DateTime, and_, cast, desc, func, or_
+from sqlalchemy import and_, desc, func, or_
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, col, select
 
+from app.core.time import DISPLAY_TIMEZONE
 from app.models.common import utcnow
 from app.models.job import Job
 from app.models.source import Source
@@ -77,19 +78,13 @@ class JobRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def _posted_date_expr(self):
-        raw_data = col(Job.raw_data)
-        return func.coalesce(
-            raw_data.op("->>")("date_posted"),
-            raw_data.op("->>")("date_created"),
-        )
-
-    def _posted_date_sort_expr(self):
-        return cast(self._posted_date_expr(), DateTime(timezone=True))
+    @staticmethod
+    def _local_day_start(day: date) -> datetime:
+        return datetime.combine(day, time.min, tzinfo=DISPLAY_TIMEZONE).astimezone(UTC)
 
     def _posted_within_days_condition(self, days: int):
-        cutoff = (utcnow().date() - timedelta(days=days)).isoformat()
-        return func.substr(self._posted_date_expr(), 1, 10) >= cutoff
+        cutoff_day = utcnow().astimezone(DISPLAY_TIMEZONE).date() - timedelta(days=days)
+        return col(Job.date_posted) >= self._local_day_start(cutoff_day)
 
     def list_jobs(
         self,
@@ -103,12 +98,15 @@ class JobRepository:
             conditions.append(col(Job.title).ilike(f"%{filters.q}%"))
         if filters.source:
             conditions.append(col(Job.source) == filters.source)
-        if filters.posted_from or filters.posted_to:
-            posted_date = func.substr(self._posted_date_expr(), 1, 10)
-            if filters.posted_from:
-                conditions.append(posted_date >= filters.posted_from.isoformat())
-            if filters.posted_to:
-                conditions.append(posted_date <= filters.posted_to.isoformat())
+        if filters.posted_from:
+            conditions.append(
+                col(Job.date_posted) >= self._local_day_start(filters.posted_from)
+            )
+        if filters.posted_to:
+            conditions.append(
+                col(Job.date_posted)
+                < self._local_day_start(filters.posted_to + timedelta(days=1))
+            )
 
         count_statement = select(func.count(col(Job.id)))
         for condition in conditions:
@@ -123,7 +121,7 @@ class JobRepository:
             statement = statement.where(condition)
         statement = (
             statement.order_by(
-                desc(self._posted_date_sort_expr()).nulls_last(),
+                desc(col(Job.date_posted)).nulls_last(),
                 col(Job.scraped_at).desc(),
                 col(Job.id).desc(),
             )
@@ -183,7 +181,7 @@ class JobRepository:
             )
 
         statement = statement.order_by(
-            desc(self._posted_date_sort_expr()).nulls_last(),
+            desc(col(Job.date_posted)).nulls_last(),
             col(Job.scraped_at).desc(),
             col(Job.id).desc(),
         )
@@ -208,7 +206,7 @@ class JobRepository:
                 self._posted_within_days_condition(posted_within_days)
             )
         statement = statement.order_by(
-            desc(self._posted_date_sort_expr()).nulls_last(),
+            desc(col(Job.date_posted)).nulls_last(),
             col(Job.scraped_at).desc(),
             col(Job.id).desc(),
         )
@@ -364,6 +362,7 @@ class JobRepository:
                     external_id=external_id,
                     source=source,
                     title=scraped_job.title,
+                    date_posted=scraped_job.date_posted,
                     raw_data=scraped_job.raw_data,
                     scraped_at=scraped_at,
                 )
@@ -373,6 +372,7 @@ class JobRepository:
                 continue
 
             current.title = scraped_job.title
+            current.date_posted = scraped_job.date_posted
             current.raw_data = scraped_job.raw_data
             current.scraped_at = scraped_at
             self.session.add(current)
@@ -397,6 +397,6 @@ def serialize_job(job: Job) -> dict[str, Any]:
         "title": job.title,
         "url": job.url,
         "source": job.source,
-        "posted_at": job.posted_at.isoformat() if job.posted_at else None,
+        "posted_at": job.date_posted.isoformat() if job.date_posted else None,
         "scraped_at": job.scraped_at.isoformat(),
     }

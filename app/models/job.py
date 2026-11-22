@@ -22,6 +22,10 @@ class Job(SQLModel, table=True):
         default_factory=utcnow,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
+    date_posted: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     raw_data: dict[str, Any] | None = Field(default=None, sa_type=JSON_TYPE)
 
     @property
@@ -33,16 +37,3 @@ class Job(SQLModel, table=True):
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             return None
         return value
-
-    @property
-    def posted_at(self) -> datetime | None:
-        raw_data = self.raw_data or {}
-        for key in ("date_posted", "date_created"):
-            value = raw_data.get(key)
-            if not isinstance(value, str):
-                continue
-            try:
-                return datetime.fromisoformat(value)
-            except ValueError:
-                continue
-        return None

@@ -12,6 +12,7 @@ from app.models.source import Source
 from app.scrapers.base import JobSourceAdapter, ScrapedJob
 from app.scrapers.config import resolve_http_profile
 from app.scrapers.http import fetch_text, text_session
+from app.scrapers.jobs.dates import parse_posted_date
 from app.scrapers.registry import register_job_adapter
 
 logger = logging.getLogger(__name__)
@@ -86,11 +87,13 @@ class JoblyJobAdapter(JobSourceAdapter):
                 logger.warning("Skipping Jobly job entry with unparsable id: %s", href)
                 continue
 
+            raw_data = cls._raw_data(article, _absolute_url(href))
             jobs.append(
                 ScrapedJob(
                     external_id=external_id,
                     title=title,
-                    raw_data=cls._raw_data(article, _absolute_url(href)),
+                    date_posted=parse_posted_date(raw_data.get("date_posted")),
+                    raw_data=raw_data,
                 )
             )
 
