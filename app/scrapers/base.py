@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal, Protocol
 
@@ -11,6 +12,7 @@ ProductAvailability = Literal["in_stock", "out_of_stock", "unknown"]
 class ScrapedJob(BaseModel):
     external_id: str
     title: str
+    date_posted: datetime | None = None
     raw_data: dict[str, Any] | None = None
 
 

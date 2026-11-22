@@ -13,23 +13,17 @@ def _add_job(
     title: str,
     source: str = "duunitori",
     posted_at: str | None = "2026-11-04T12:00:00+02:00",
-    date_created: str | None = None,
     link: str = "https://example.test/jobs/1",
     scraped_at: datetime | None = None,
 ) -> None:
-    raw_data: dict[str, str] = {"link": link}
-    if posted_at is not None:
-        raw_data["date_posted"] = posted_at
-    if date_created is not None:
-        raw_data["date_created"] = date_created
-
     session.add(
         Job(
             external_id=external_id,
             source=source,
             title=title,
+            date_posted=datetime.fromisoformat(posted_at) if posted_at else None,
             scraped_at=scraped_at or datetime(2026, 11, 5, 10, 0, tzinfo=UTC),
-            raw_data=raw_data,
+            raw_data={"link": link},
         )
     )
 
@@ -139,7 +133,7 @@ def test_jobs_page_orders_offsets_chronologically(
     )
 
 
-def test_jobs_page_orders_date_created_fallback_and_puts_nulls_last(
+def test_jobs_page_uses_only_date_posted_and_puts_nulls_last(
     authenticated_client: TestClient,
     session: Session,
 ) -> None:
@@ -149,12 +143,14 @@ def test_jobs_page_orders_date_created_fallback_and_puts_nulls_last(
         title="No posted date",
         posted_at=None,
     )
-    _add_job(
-        session,
-        external_id="2",
-        title="Fallback created date",
-        posted_at=None,
-        date_created="2026-11-05T12:00:00+00:00",
+    session.add(
+        Job(
+            external_id="2",
+            source="duunitori",
+            title="Raw data only",
+            scraped_at=datetime(2026, 11, 5, 10, 0, tzinfo=UTC),
+            raw_data={"date_posted": "2026-11-05T12:00:00+00:00"},
+        )
     )
     _add_job(
         session,
@@ -166,10 +162,10 @@ def test_jobs_page_orders_date_created_fallback_and_puts_nulls_last(
 
     response = authenticated_client.get("/jobs")
 
-    fallback_index = response.text.index("Fallback created date")
     posted_index = response.text.index("Posted date")
+    raw_index = response.text.index("Raw data only")
     missing_index = response.text.index("No posted date")
-    assert fallback_index < posted_index < missing_index
+    assert posted_index < raw_index < missing_index
 
 
 def test_jobs_page_does_not_render_unsafe_links(

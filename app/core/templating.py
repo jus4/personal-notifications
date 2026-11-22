@@ -1,13 +1,12 @@
 from datetime import UTC, datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 
 from app.core.security import is_authenticated
+from app.core.time import DISPLAY_TIMEZONE
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
-DISPLAY_TIMEZONE = ZoneInfo("Europe/Helsinki")
 
 
 def _as_utc(value: datetime) -> datetime:

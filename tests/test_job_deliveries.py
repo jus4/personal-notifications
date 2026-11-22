@@ -71,13 +71,13 @@ def test_unread_jobs_respects_recency_window(session: Session) -> None:
                 external_id="recent",
                 source="test",
                 title="Recent",
-                raw_data={"date_posted": now.isoformat()},
+                date_posted=now,
             ),
             Job(
                 external_id="old",
                 source="test",
                 title="Old",
-                raw_data={"date_posted": (now - timedelta(days=40)).isoformat()},
+                date_posted=now - timedelta(days=40),
             ),
             Job(external_id="undated", source="test", title="Undated"),
         ]

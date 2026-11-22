@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -82,6 +83,8 @@ def test_fetch_maps_jobly_jobs(monkeypatch: Any) -> None:
         "date_posted": "2026-11-09",
         "location": "Espoo",
     }
+    assert jobs[0].date_posted == datetime(2026, 11, 11, tzinfo=UTC)
+    assert jobs[1].date_posted == datetime(2026, 11, 9, tzinfo=UTC)
     assert "page=0" in requested[0]
     assert "job_geo_location=Uusimaa%2C%20Suomi" in requested[0]
     assert len(requested) == 2

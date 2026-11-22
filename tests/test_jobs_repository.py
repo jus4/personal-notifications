@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from sqlmodel import Session, select
 
 from app.models.job import Job
@@ -6,10 +8,11 @@ from app.services.jobs import JobRepository
 
 
 def test_upsert_inserts_new_jobs(session: Session) -> None:
+    posted_at = datetime(2026, 11, 4, 12, 0, tzinfo=UTC)
     result = JobRepository(session).upsert_many(
         "duunitori",
         [
-            ScrapedJob(external_id="1", title="First"),
+            ScrapedJob(external_id="1", title="First", date_posted=posted_at),
             ScrapedJob(external_id="2", title="Second", raw_data={"id": 2}),
         ],
     )
@@ -19,8 +22,13 @@ def test_upsert_inserts_new_jobs(session: Session) -> None:
     assert result.updated == 0
     assert result.skipped == 0
 
-    jobs = session.exec(select(Job).where(Job.source == "duunitori")).all()
-    assert {job.external_id for job in jobs} == {"1", "2"}
+    jobs = {
+        job.external_id: job
+        for job in session.exec(select(Job).where(Job.source == "duunitori")).all()
+    }
+    assert set(jobs) == {"1", "2"}
+    assert jobs["1"].date_posted == posted_at
+    assert jobs["2"].date_posted is None
 
 
 def test_upsert_reports_inserted_ids_only(session: Session) -> None:
@@ -59,11 +67,17 @@ def test_upsert_updates_existing_and_skips_duplicates(session: Session) -> None:
     original_id = existing.id
     original_scraped_at = existing.scraped_at
 
+    posted_at = datetime(2026, 11, 4, 12, 0, tzinfo=UTC)
     result = repository.upsert_many(
         "duunitori",
         [
             ScrapedJob(external_id="1", title="New", raw_data={"version": 2}),
-            ScrapedJob(external_id="1", title="Newest", raw_data={"version": 3}),
+            ScrapedJob(
+                external_id="1",
+                title="Newest",
+                date_posted=posted_at,
+                raw_data={"version": 3},
+            ),
         ],
     )
 
@@ -75,5 +89,6 @@ def test_upsert_updates_existing_and_skips_duplicates(session: Session) -> None:
     updated = session.exec(select(Job).where(Job.source == "duunitori")).one()
     assert updated.id == original_id
     assert updated.title == "Newest"
+    assert updated.date_posted == posted_at
     assert updated.raw_data == {"version": 3}
     assert updated.scraped_at >= original_scraped_at

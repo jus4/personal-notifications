@@ -6,6 +6,7 @@ from app.models.source import Source
 from app.scrapers.base import JobSourceAdapter, ScrapedJob
 from app.scrapers.config import resolve_http_profile
 from app.scrapers.http import fetch_json
+from app.scrapers.jobs.dates import parse_posted_date
 from app.scrapers.registry import register_job_adapter
 
 logger = logging.getLogger(__name__)
@@ -56,5 +57,6 @@ class DuunitoriJobAdapter(JobSourceAdapter):
         return ScrapedJob(
             external_id=str(external_id),
             title=str(title),
+            date_posted=parse_posted_date(item.get("date_posted")),
             raw_data=item,
         )
