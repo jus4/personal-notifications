@@ -13,8 +13,7 @@ from app.api.routes.products import router as products_router
 from app.api.routes.sources import router as sources_router
 from app.api.routes.websocket import router as websocket_router
 from app.core.config import get_settings
-from app.services.notification_scheduler import run_scrape_scheduler
-from app.services.product_scheduler import run_product_scrape_scheduler
+from app.services.scrape_scheduler import run_scrape_scheduler
 
 settings = get_settings()
 
@@ -23,16 +22,11 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     tasks: list[asyncio.Task[None]] = []
 
-    if settings.scrape_interval_seconds > 0:
-        tasks.append(
-            asyncio.create_task(run_scrape_scheduler(settings.scrape_interval_seconds))
-        )
-    if settings.product_scrape_interval_seconds > 0:
-        tasks.append(
-            asyncio.create_task(
-                run_product_scrape_scheduler(settings.product_scrape_interval_seconds)
-            )
-        )
+    if (
+        settings.scrape_interval_seconds > 0
+        or settings.product_scrape_interval_seconds > 0
+    ):
+        tasks.append(asyncio.create_task(run_scrape_scheduler(settings)))
 
     try:
         yield
