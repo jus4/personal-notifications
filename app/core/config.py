@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,7 +20,9 @@ class Settings(BaseSettings):
     session_secret: str = "dev-insecure-change-me"
     session_cookie_name: str = "notification_session"
     session_max_age: int = 60 * 60 * 24 * 30
-    scrape_interval_seconds: int = 60 * 30
+    scrape_interval_seconds: int = 60 * 60 * 3
+    scrape_active_start_hour: int = 6
+    scrape_active_end_hour: int = 21
     product_scrape_interval_seconds: int = 60 * 60 * 24
     scraper_user_agent: str = "notification-service/0.1"
     scraper_impersonate: str = "chrome"
@@ -29,6 +32,25 @@ class Settings(BaseSettings):
     scraper_timeout_seconds: float = 15.0
     job_reshow_after_seconds: int = 60 * 30
     job_recency_days: int = 30
+
+    @field_validator("scrape_active_start_hour", "scrape_active_end_hour")
+    @classmethod
+    def _validate_hour(cls, value: int) -> int:
+        if not 0 <= value <= 23:
+            raise ValueError("must be between 0 and 23")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_scrape_schedule(self) -> "Settings":
+        if self.scrape_interval_seconds < 0:
+            raise ValueError("SCRAPE_INTERVAL_SECONDS must be >= 0")
+        if self.product_scrape_interval_seconds < 0:
+            raise ValueError("PRODUCT_SCRAPE_INTERVAL_SECONDS must be >= 0")
+        if self.scrape_active_start_hour > self.scrape_active_end_hour:
+            raise ValueError(
+                "SCRAPE_ACTIVE_START_HOUR must be <= SCRAPE_ACTIVE_END_HOUR"
+            )
+        return self
 
     @property
     def is_production(self) -> bool:

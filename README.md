@@ -75,6 +75,9 @@ uv run alembic upgrade head
 | `SCRAPER_PROXY_URL` | empty | Optional HTTP(S) proxy for all scrape requests |
 | `SCRAPER_HTML_PROXY_URL` | empty | Optional HTTP(S) proxy for HTML sources (falls back to `SCRAPER_PROXY_URL`) |
 | `SCRAPER_TIMEOUT_SECONDS` | `15` | Timeout for scrape requests in seconds |
+| `SCRAPE_INTERVAL_SECONDS` | `10800` | Job scrape slot interval during active hours; `0` disables the job scheduler |
+| `SCRAPE_ACTIVE_START_HOUR` | `6` | First hour of the scheduler's active window in `Europe/Helsinki` |
+| `SCRAPE_ACTIVE_END_HOUR` | `21` | Last hour of the scheduler's active window in `Europe/Helsinki` |
 | `PRODUCT_SCRAPE_INTERVAL_SECONDS` | `86400` | Minimum age before a product offer is scraped again; `0` disables the product scheduler |
 
 `APP_PASSWORD` is required when `ENVIRONMENT=production`, and `SESSION_SECRET`
@@ -144,18 +147,34 @@ uv run python -m app.cli scrape --kind jobs
 uv run python -m app.cli scrape --kind products
 ```
 
-### Cron example
+### Scheduler
 
-```cron
-*/30 * * * * cd /path/to/notification-service && /usr/bin/env uv run python -m app.cli scrape --kind jobs >> /tmp/notification-scrape.log 2>&1
-0 6 * * * cd /path/to/notification-service && /usr/bin/env uv run python -m app.cli scrape --kind products >> /tmp/product-scrape.log 2>&1
-```
+The FastAPI process runs a single in-process scheduler when
+`SCRAPE_INTERVAL_SECONDS` or `PRODUCT_SCRAPE_INTERVAL_SECONDS` is positive.
+It uses the `Europe/Helsinki` timezone and does not poll while waiting:
 
-The FastAPI process also runs in-process schedulers when
-`SCRAPE_INTERVAL_SECONDS` and `PRODUCT_SCRAPE_INTERVAL_SECONDS` are positive.
+- Job scrapes run at slots from `SCRAPE_ACTIVE_START_HOUR` to
+  `SCRAPE_ACTIVE_END_HOUR`, spaced by `SCRAPE_INTERVAL_SECONDS`. With the
+  defaults, that is 06:00, 09:00, 12:00, 15:00, 18:00, and 21:00.
+- Product scraping runs once per day together with the first morning job slot.
+- No scheduler queries run during the night.
+- If the process starts inside the active window, it runs one catch-up scrape
+  and then continues with the normal slots.
+
 Job and product scrapes share a lock, so scheduled runs skip and manual runs
 wait when another scrape is active. Keep the API at one instance so the lock
 remains effective.
+
+The cron example below is an alternative for deployments that want to schedule
+scraping outside the app. Do not run both cron and the in-process scheduler.
+
+```cron
+0 6,9,12,15,18,21 * * * cd /path/to/notification-service && /usr/bin/env uv run python -m app.cli scrape --kind jobs >> /tmp/notification-scrape.log 2>&1
+0 6 * * * cd /path/to/notification-service && /usr/bin/env uv run python -m app.cli scrape --kind products >> /tmp/product-scrape.log 2>&1
+```
+
+Cron uses the host timezone. Set the server timezone to `Europe/Helsinki` or
+adjust the hours accordingly.
 
 ## Tests and linting
 
