@@ -10,7 +10,11 @@ from app.models.product_source import ProductSource
 from app.models.source import Source
 from app.scrapers.base import ScrapedProduct
 from app.scrapers.registry import PRODUCT_ADAPTERS
-from app.services.product_scrape import run_product_scrape, run_product_source
+from app.services.product_scrape import (
+    run_product_offers,
+    run_product_scrape,
+    run_product_source,
+)
 from app.services.products import ProductRepository
 
 
@@ -156,3 +160,146 @@ def test_run_product_scrape_reports_missing_adapter(session: Session) -> None:
     assert batch.source_count == 1
     assert len(batch.failures) == 1
     assert "No product adapter registered" in batch.failures[0].error
+
+
+def test_run_product_offers_updates_only_target_product(
+    monkeypatch: pytest.MonkeyPatch,
+    session: Session,
+) -> None:
+    source = _source(session)
+    repository = ProductRepository(session)
+    target = repository.create_product(title="Solution")
+    other = repository.create_product(title="Miura")
+    target_link = repository.add_product_source(
+        product_id=target.id or 0,
+        source_id=source.id or 0,
+        url="https://example.test/solution",
+    )
+    other_link = repository.add_product_source(
+        product_id=other.id or 0,
+        source_id=source.id or 0,
+        url="https://example.test/miura",
+    )
+    fetched: list[str] = []
+
+    class FakeAdapter:
+        key = "fake-product"
+
+        async def fetch(self, source: Source, url: str) -> list[ScrapedProduct]:
+            fetched.append(url)
+            return [
+                ScrapedProduct(
+                    external_id="301-0448",
+                    title="Scraped solution",
+                    price=Decimal("131.96"),
+                    currency="EUR",
+                    availability="in_stock",
+                    sizes=["40", "41"],
+                )
+            ]
+
+    monkeypatch.setitem(PRODUCT_ADAPTERS, FakeAdapter.key, FakeAdapter)
+
+    batch = asyncio.run(run_product_offers(session, target, force=True))
+
+    assert batch.source_count == 1
+    assert len(batch.results) == 1
+    result = batch.results[0]
+    assert result.source == "bergfreunde"
+    assert result.links == 1
+    assert result.updated == 1
+    assert result.failed == 0
+    assert fetched == [target_link.url]
+
+    session.refresh(target_link)
+    session.refresh(other_link)
+    assert target_link.title == "Scraped solution"
+    assert target_link.price == Decimal("131.96")
+    assert target_link.sizes == ["40", "41"]
+    assert target_link.last_scraped_at is not None
+    assert other_link.title is None
+    assert other_link.last_scraped_at is None
+
+
+def test_run_product_offers_without_links_returns_empty_batch(
+    session: Session,
+) -> None:
+    product = ProductRepository(session).create_product(title="Solution")
+
+    batch = asyncio.run(run_product_offers(session, product, force=True))
+
+    assert batch.source_count == 0
+    assert batch.results == []
+    assert batch.failures == []
+
+
+def test_run_product_offers_reports_missing_adapter(session: Session) -> None:
+    source = Source(
+        slug="unknown-shop",
+        kind="products",
+        adapter="missing-product",
+        enabled=True,
+    )
+    session.add(source)
+    session.commit()
+    session.refresh(source)
+
+    repository = ProductRepository(session)
+    product = repository.create_product(title="Solution")
+    repository.add_product_source(
+        product_id=product.id or 0,
+        source_id=source.id or 0,
+        url="https://example.test/solution",
+    )
+
+    batch = asyncio.run(run_product_offers(session, product, force=True))
+
+    assert batch.source_count == 1
+    assert batch.results == []
+    assert len(batch.failures) == 1
+    assert batch.failures[0].source == "unknown-shop"
+    assert "No product adapter registered" in batch.failures[0].error
+
+
+def test_run_product_offers_isolates_link_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    session: Session,
+) -> None:
+    source = _source(session)
+    repository = ProductRepository(session)
+    product = repository.create_product(title="Solution")
+    failing = repository.add_product_source(
+        product_id=product.id or 0,
+        source_id=source.id or 0,
+        url="https://example.test/bad",
+    )
+    good = repository.add_product_source(
+        product_id=product.id or 0,
+        source_id=source.id or 0,
+        url="https://example.test/good",
+    )
+
+    class FakeAdapter:
+        key = "fake-product"
+
+        async def fetch(self, source: Source, url: str) -> list[ScrapedProduct]:
+            if url == failing.url:
+                raise RuntimeError("boom")
+            return [ScrapedProduct(external_id="good", title="Good product")]
+
+    monkeypatch.setitem(PRODUCT_ADAPTERS, FakeAdapter.key, FakeAdapter)
+
+    batch = asyncio.run(run_product_offers(session, product, force=True))
+
+    assert batch.source_count == 1
+    assert len(batch.results) == 1
+    result = batch.results[0]
+    assert result.links == 2
+    assert result.updated == 1
+    assert result.failed == 1
+    assert "boom" in result.errors[0]
+
+    session.refresh(failing)
+    session.refresh(good)
+    assert failing.last_error == "boom"
+    assert good.external_id == "good"

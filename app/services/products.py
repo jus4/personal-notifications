@@ -341,6 +341,28 @@ class ProductRepository:
         statement = statement.order_by(col(ProductSource.id))
         return list(self.session.exec(statement).all())
 
+    def list_product_links(
+        self,
+        product_id: int,
+        *,
+        due_before: datetime | None = None,
+    ) -> list[ProductSource]:
+        statement = select(ProductSource).where(
+            col(ProductSource.product_id) == product_id
+        )
+        if due_before is not None:
+            statement = statement.where(
+                or_(
+                    col(ProductSource.last_scraped_at).is_(None),
+                    col(ProductSource.last_scraped_at) < due_before,
+                )
+            )
+        statement = statement.order_by(
+            col(ProductSource.source_id),
+            col(ProductSource.id),
+        )
+        return list(self.session.exec(statement).all())
+
     def create_product(
         self,
         *,

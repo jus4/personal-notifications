@@ -23,6 +23,9 @@ Build with FastAPI, SQLModel and Alembic.
     - Hardloop
 - Websocket support for admin user for showing notifications on new jobs. `scripts` folder includes a sample script for websocket client that can be used as a running service and send notifications via `dunst`
 - Admin management for managing sources, products and webshop sources
+- Product source error management with URL testing and correction
+- Manufacturer and category tracking for products with separate lookup tables
+- One-time JSON snapshot export and ingest for production
 - Basic cli for managing sources
 - curl_cffi tp bypass Cloudflare on source configs
 - External proxy support to configs if Cloudflare has blocked by IP
@@ -176,6 +179,40 @@ scraping outside the app. Do not run both cron and the in-process scheduler.
 Cron uses the host timezone. Set the server timezone to `Europe/Helsinki` or
 adjust the hours accordingly.
 
+## One-time product snapshot export and ingest
+
+Product data is exported locally to a JSON snapshot and applied in production
+without performing network requests.
+
+```bash
+# Local: export all products and offers to a snapshot
+uv run python -m app.cli products export \
+  --output data/products_all_sources.json
+
+# Optional: limit the export to one source or manufacturer
+uv run python -m app.cli products export \
+  --source bergfreunde \
+  --manufacturer la-sportiva \
+  --output data/bergfreunde_products.json
+
+# Production: apply the schema migration and ingest the snapshot
+uv run alembic upgrade head
+uv run python -m app.cli products ingest \
+  --input data/products_all_sources.json
+```
+
+Use `--dry-run` with `products ingest` to validate the snapshot and roll back
+all writes. The ingest is idempotent: products are matched by shop URL, existing
+offers are refreshed, and manually edited product titles are preserved.
+
+The snapshot format is version 3 and can contain offers from multiple product
+sources. Legacy version 2 snapshots are still accepted. Snapshots exported
+before category support (version 1) are rejected, so re-export before ingesting.
+
+Without `--source`, `products export` includes every product source. These
+commands are manual one-time tools and are not part of the schedulers or cron
+examples above.
+
 ## Tests and linting
 
 Tests require a PostgreSQL server. Set `TEST_DATABASE_URL` to a dedicated test
@@ -195,7 +232,7 @@ app/
   api/          FastAPI routes
   core/         application settings
   db/           engine, session, and metadata
-  models/       Job, Source, Product, and ProductSource models
+  models/       Job, Source, Product, ProductSource, Manufacturer, Category models
   scrapers/     adapter protocols, HTTP helper, registry, source adapters
   services/     job/product repositories, scrape orchestration, schedulers
   cli.py        source management and scrape CLI
@@ -219,6 +256,7 @@ Product:  Source row + ProductSource URL -> adapter registry
 - `source`
 - `title`
 - `scraped_at`
+- `date_posted`
 - `raw_data`
 
 `jobs` has a unique constraint on `(source, external_id)`.
@@ -241,6 +279,22 @@ product URLs live on `product_sources`.
 
 - `title`
 - `image_url`
+- `manufacturer_id`
+- `category_id`
+- `created_at`
+- `updated_at`
+
+`manufacturers`:
+
+- `name`
+- `slug`
+- `created_at`
+- `updated_at`
+
+`categories`:
+
+- `name`
+- `slug`
 - `created_at`
 - `updated_at`
 
@@ -276,7 +330,15 @@ The product UI supports:
 - creating canonical products with a title and optional image;
 - linking and unlinking shop product URLs;
 - viewing per-shop prices, sizes, availability, scrape times, and errors;
-- viewing the lowest linked price and the union of sizes for a product.
+- viewing the lowest linked price and the union of sizes for a product;
+- reviewing failed product offers at `/product-sources`, testing a corrected
+  URL, and saving it without clearing existing scraped offer data.
+
+The `/product-sources` page shows only offers with a `last_error` by default.
+Use `Show all` to include healthy offers. Testing a URL fetches the candidate
+page with the shop adapter and compares the scraped result to the linked
+product using the stored external ID first, then a normalized title match.
+Testing does not update the database; only `Save URL` clears the error.
 
 Shop rows are managed with the CLI, for example:
 

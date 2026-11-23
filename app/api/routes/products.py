@@ -7,7 +7,11 @@ from app.core.htmx import is_htmx
 from app.core.security import is_authenticated
 from app.core.templating import templates
 from app.db.session import SessionDep
-from app.services.product_scrape import ProductScrapeBatchResult, run_product_scrape
+from app.services.product_scrape import (
+    ProductScrapeBatchResult,
+    run_product_offers,
+    run_product_scrape,
+)
 from app.services.products import ProductRepository
 from app.services.scrape_lock import scrape_lock
 
@@ -116,6 +120,35 @@ async def scrape_products(request: Request, session: SessionDep) -> Response:
     repository = ProductRepository(session)
     context = _products_context(repository, scrape_batch=batch)
     return templates.TemplateResponse(request, "products.html", context)
+
+
+@router.post("/products/{product_id}/scrape", response_class=HTMLResponse)
+async def scrape_product(
+    request: Request,
+    session: SessionDep,
+    product_id: int,
+) -> Response:
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
+    repository = ProductRepository(session)
+    product = repository.get_product(product_id)
+    if product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    async with scrape_lock:
+        batch = await run_product_offers(session, product, force=True)
+
+    if is_htmx(request):
+        response = templates.TemplateResponse(
+            request,
+            "_product_scrape_feedback.html",
+            {"product": product, "scrape_batch": batch},
+        )
+        response.headers["HX-Trigger"] = "productScraped"
+        return response
+
+    return RedirectResponse(url=f"/products/{product_id}", status_code=303)
 
 
 @router.get("/products/{product_id}", response_class=HTMLResponse)
