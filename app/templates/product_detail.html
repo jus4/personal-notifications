@@ -8,11 +8,28 @@
 {% block content %}
 {% set image = detail.product.image_url or detail.image_url %}
 <div class="w-full max-w-6xl space-y-6">
-  <div>
+  <div class="flex items-center justify-between gap-4">
     <a href="/products" class="text-sm font-medium text-sky-400 transition hover:text-sky-300">
       ← Back to products
     </a>
+    <form
+      action="/products/{{ detail.product.id }}/scrape"
+      method="post"
+      hx-post="/products/{{ detail.product.id }}/scrape"
+      hx-target="#product-scrape-feedback"
+      hx-swap="innerHTML"
+      hx-disabled-elt="find button"
+    >
+      <button
+        type="submit"
+        class="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50 disabled:cursor-wait disabled:opacity-60"
+      >
+        Scrape product
+      </button>
+    </form>
   </div>
+
+  <div id="product-scrape-feedback"></div>
 
   {% if error %}
   <div class="rounded-lg border border-red-900 bg-red-950/60 px-4 py-3 text-sm text-red-200">
@@ -20,6 +37,14 @@
   </div>
   {% endif %}
 
+  <div
+    id="product-detail-content"
+    class="space-y-6"
+    hx-get="/products/{{ detail.product.id }}"
+    hx-trigger="productScraped from:body"
+    hx-select="#product-detail-content"
+    hx-swap="outerHTML"
+  >
   <div class="rounded-2xl border border-slate-800 bg-slate-900 p-5">
     <div class="flex flex-col gap-5 sm:flex-row">
       {% if image %}
@@ -229,6 +254,7 @@
       No shop offers linked yet. Add a product URL above.
     </p>
     {% endif %}
+  </div>
   </div>
 </div>
 {% endblock %}

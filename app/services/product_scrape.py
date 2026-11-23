@@ -111,28 +111,14 @@ def _titles_match(linked_title: str, scraped_title: str) -> bool:
     return SequenceMatcher(None, linked, scraped).ratio() >= 0.8
 
 
-async def run_product_source(
+async def _scrape_links(
     session: Session,
+    repository: ProductRepository,
+    adapter: ProductSourceAdapter,
     source: Source,
-    *,
-    force: bool = False,
-    due_before: datetime | None = None,
-) -> ProductScrapeResult:
-    adapter_cls = PRODUCT_ADAPTERS.get(source.adapter)
-    if adapter_cls is None:
-        raise ValueError(
-            f"No product adapter registered for {source.adapter!r} "
-            f"(source {source.slug!r})"
-        )
-
-    adapter: ProductSourceAdapter = adapter_cls()
-    repository = ProductRepository(session)
-    links = repository.list_source_links(
-        source.id if source.id is not None else -1,
-        due_before=None if force else due_before,
-    )
-    result = ProductScrapeResult(source=source.slug, links=len(links))
-
+    links: list[ProductSource],
+    result: ProductScrapeResult,
+) -> None:
     for link in links:
         link_id = link.id
         if link_id is None:
@@ -172,7 +158,86 @@ async def run_product_source(
             result.failed += 1
             result.errors.append(f"{link_url}: {exc}")
 
+
+async def run_product_source(
+    session: Session,
+    source: Source,
+    *,
+    force: bool = False,
+    due_before: datetime | None = None,
+) -> ProductScrapeResult:
+    adapter_cls = PRODUCT_ADAPTERS.get(source.adapter)
+    if adapter_cls is None:
+        raise ValueError(
+            f"No product adapter registered for {source.adapter!r} "
+            f"(source {source.slug!r})"
+        )
+
+    adapter: ProductSourceAdapter = adapter_cls()
+    repository = ProductRepository(session)
+    links = repository.list_source_links(
+        source.id if source.id is not None else -1,
+        due_before=None if force else due_before,
+    )
+    result = ProductScrapeResult(source=source.slug, links=len(links))
+    await _scrape_links(session, repository, adapter, source, links, result)
     return result
+
+
+async def run_product_offers(
+    session: Session,
+    product: Product,
+    *,
+    force: bool = True,
+    interval_seconds: int | None = None,
+) -> ProductScrapeBatchResult:
+    if interval_seconds is None:
+        interval_seconds = get_settings().product_scrape_interval_seconds
+
+    due_before = None if force else utcnow() - timedelta(seconds=interval_seconds)
+
+    repository = ProductRepository(session)
+    links = repository.list_product_links(
+        product.id if product.id is not None else -1,
+        due_before=due_before,
+    )
+
+    grouped: dict[int, list[ProductSource]] = {}
+    for link in links:
+        grouped.setdefault(link.source_id, []).append(link)
+
+    batch = ProductScrapeBatchResult(source_count=len(grouped))
+    for source_id, source_links in grouped.items():
+        source = session.get(Source, source_id)
+        if source is None:
+            continue
+
+        adapter_cls = PRODUCT_ADAPTERS.get(source.adapter)
+        if adapter_cls is None:
+            batch.failures.append(
+                ProductScrapeFailure(
+                    source=source.slug,
+                    error=(
+                        f"No product adapter registered for {source.adapter!r} "
+                        f"(source {source.slug!r})"
+                    ),
+                )
+            )
+            continue
+
+        adapter: ProductSourceAdapter = adapter_cls()
+        result = ProductScrapeResult(source=source.slug, links=len(source_links))
+        await _scrape_links(
+            session,
+            repository,
+            adapter,
+            source,
+            source_links,
+            result,
+        )
+        batch.results.append(result)
+
+    return batch
 
 
 async def run_product_scrape(

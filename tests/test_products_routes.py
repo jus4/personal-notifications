@@ -232,3 +232,160 @@ def test_scrape_products_shows_link_errors(
     assert response.status_code == 200
     assert "Errors" in response.text
     assert "blocked by shop" in response.text
+
+
+def test_product_pages_render_single_scrape_controls(
+    authenticated_client: TestClient,
+    session: Session,
+) -> None:
+    shop = _shop(session)
+    repository = ProductRepository(session)
+    product = repository.create_product(title="Solution")
+    repository.add_product_source(
+        product_id=product.id or 0,
+        source_id=shop.id or 0,
+        url="https://example.test/solution",
+    )
+
+    list_response = authenticated_client.get("/products")
+    assert list_response.status_code == 200
+    assert "Scrape product" in list_response.text
+    assert f'hx-post="/products/{product.id}/scrape"' in list_response.text
+    assert 'id="product-scrape-feedback"' in list_response.text
+    assert 'hx-trigger="productScraped from:body"' in list_response.text
+
+    detail_response = authenticated_client.get(f"/products/{product.id}")
+    assert detail_response.status_code == 200
+    assert "Scrape product" in detail_response.text
+    assert f'hx-post="/products/{product.id}/scrape"' in detail_response.text
+    assert 'id="product-scrape-feedback"' in detail_response.text
+    assert 'hx-select="#product-detail-content"' in detail_response.text
+
+
+def test_scrape_single_product_requires_authentication(
+    client: TestClient,
+) -> None:
+    response = client.post("/products/1/scrape", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
+def test_scrape_single_product_unknown_returns_404(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.post(
+        "/products/9999/scrape",
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_scrape_single_product_htmx_updates_only_that_product(
+    authenticated_client: TestClient,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shop = _shop(session)
+    repository = ProductRepository(session)
+    target = repository.create_product(title="Solution")
+    other = repository.create_product(title="Miura")
+    target_link = repository.add_product_source(
+        product_id=target.id or 0,
+        source_id=shop.id or 0,
+        url="https://example.test/solution",
+    )
+    other_link = repository.add_product_source(
+        product_id=other.id or 0,
+        source_id=shop.id or 0,
+        url="https://example.test/miura",
+    )
+    fetched: list[str] = []
+
+    class FakeAdapter:
+        key = "fake-product"
+
+        async def fetch(self, source: Source, url: str) -> list[ScrapedProduct]:
+            fetched.append(url)
+            return [
+                ScrapedProduct(
+                    external_id="301-0448",
+                    title="Scraped solution",
+                    price=Decimal("131.96"),
+                    currency="EUR",
+                    sizes=["40", "41"],
+                )
+            ]
+
+    monkeypatch.setitem(PRODUCT_ADAPTERS, FakeAdapter.key, FakeAdapter)
+
+    response = authenticated_client.post(
+        f"/products/{target.id}/scrape",
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["HX-Trigger"] == "productScraped"
+    assert "Product scrape results" in response.text
+    assert "bergfreunde" in response.text
+    assert fetched == [target_link.url]
+
+    session.expire_all()
+    updated = session.get(ProductSource, target_link.id)
+    assert updated is not None
+    assert updated.title == "Scraped solution"
+    assert updated.price == Decimal("131.96")
+    assert updated.sizes == ["40", "41"]
+    assert updated.last_scraped_at is not None
+
+    untouched = session.get(ProductSource, other_link.id)
+    assert untouched is not None
+    assert untouched.title is None
+    assert untouched.last_scraped_at is None
+
+
+def test_scrape_single_product_non_htmx_redirects_to_detail(
+    authenticated_client: TestClient,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shop = _shop(session)
+    repository = ProductRepository(session)
+    product = repository.create_product(title="Solution")
+    repository.add_product_source(
+        product_id=product.id or 0,
+        source_id=shop.id or 0,
+        url="https://example.test/solution",
+    )
+
+    class FakeAdapter:
+        key = "fake-product"
+
+        async def fetch(self, source: Source, url: str) -> list[ScrapedProduct]:
+            return [ScrapedProduct(external_id="1", title="Solution")]
+
+    monkeypatch.setitem(PRODUCT_ADAPTERS, FakeAdapter.key, FakeAdapter)
+
+    response = authenticated_client.post(
+        f"/products/{product.id}/scrape",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/products/{product.id}"
+
+
+def test_scrape_single_product_without_offers_shows_message(
+    authenticated_client: TestClient,
+    session: Session,
+) -> None:
+    product = ProductRepository(session).create_product(title="Solution")
+
+    response = authenticated_client.post(
+        f"/products/{product.id}/scrape",
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 200
+    assert "No offers linked" in response.text
