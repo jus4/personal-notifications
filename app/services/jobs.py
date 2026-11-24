@@ -191,27 +191,6 @@ class JobRepository:
 
         return list(self.session.exec(statement).all())
 
-    def list_jobs_for_notification(
-        self,
-        job_ids: list[int],
-        *,
-        posted_within_days: int | None = None,
-    ) -> list[Job]:
-        if not job_ids:
-            return []
-
-        statement = select(Job).where(col(Job.id).in_(job_ids))
-        if posted_within_days is not None:
-            statement = statement.where(
-                self._posted_within_days_condition(posted_within_days)
-            )
-        statement = statement.order_by(
-            desc(col(Job.date_posted)).nulls_last(),
-            col(Job.scraped_at).desc(),
-            col(Job.id).desc(),
-        )
-        return list(self.session.exec(statement).all())
-
     def has_shown_history(self, user_id: int) -> bool:
         statement = (
             select(col(UserJobDelivery.id))

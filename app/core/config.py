@@ -1,3 +1,4 @@
+import logging
 from functools import lru_cache
 
 from pydantic import field_validator, model_validator
@@ -14,8 +15,10 @@ class Settings(BaseSettings):
     database_url: str
     test_database_url: str | None = None
     environment: str = "development"
+    log_level: str = "INFO"
     sql_echo: bool = False
     db_pool_recycle_seconds: int = 1800
+    db_connect_timeout_seconds: int = 5
     app_password: str = ""
     session_secret: str = "dev-insecure-change-me"
     session_cookie_name: str = "notification_session"
@@ -32,6 +35,13 @@ class Settings(BaseSettings):
     scraper_timeout_seconds: float = 15.0
     job_reshow_after_seconds: int = 60 * 30
     job_recency_days: int = 30
+    notification_interval_seconds: int = 60 * 60
+    redis_url: str | None = None
+    redis_key_prefix: str = "notification"
+    redis_socket_timeout_seconds: float = 2.0
+    scrape_lock_ttl_seconds: int = 60
+    scrape_lock_renew_interval_seconds: float | None = None
+    scrape_lock_wait_timeout_seconds: float | None = None
 
     @field_validator("scrape_active_start_hour", "scrape_active_end_hour")
     @classmethod
@@ -40,17 +50,46 @@ class Settings(BaseSettings):
             raise ValueError("must be between 0 and 23")
         return value
 
+    @field_validator("log_level")
+    @classmethod
+    def _validate_log_level(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in logging.getLevelNamesMapping():
+            raise ValueError(f"unknown log level: {value!r}")
+        return normalized
+
     @model_validator(mode="after")
     def _validate_scrape_schedule(self) -> "Settings":
         if self.scrape_interval_seconds < 0:
             raise ValueError("SCRAPE_INTERVAL_SECONDS must be >= 0")
         if self.product_scrape_interval_seconds < 0:
             raise ValueError("PRODUCT_SCRAPE_INTERVAL_SECONDS must be >= 0")
+        if self.notification_interval_seconds < 0:
+            raise ValueError("NOTIFICATION_INTERVAL_SECONDS must be >= 0")
+        if self.db_connect_timeout_seconds <= 0:
+            raise ValueError("DB_CONNECT_TIMEOUT_SECONDS must be > 0")
         if self.scrape_active_start_hour > self.scrape_active_end_hour:
             raise ValueError(
                 "SCRAPE_ACTIVE_START_HOUR must be <= SCRAPE_ACTIVE_END_HOUR"
             )
+        if self.scrape_lock_ttl_seconds <= 0:
+            raise ValueError("SCRAPE_LOCK_TTL_SECONDS must be > 0")
+        wait = self.scrape_lock_wait_timeout_seconds
+        if wait is not None and wait < 0:
+            raise ValueError("SCRAPE_LOCK_WAIT_TIMEOUT_SECONDS must be >= 0")
+        renew = self.scrape_lock_renew_interval_seconds
+        if renew is not None and not 0 < renew < self.scrape_lock_ttl_seconds:
+            raise ValueError(
+                "SCRAPE_LOCK_RENEW_INTERVAL_SECONDS must be between 0 and "
+                "SCRAPE_LOCK_TTL_SECONDS"
+            )
         return self
+
+    @property
+    def effective_scrape_lock_renew_interval(self) -> float:
+        if self.scrape_lock_renew_interval_seconds is not None:
+            return self.scrape_lock_renew_interval_seconds
+        return self.scrape_lock_ttl_seconds / 3
 
     @property
     def is_production(self) -> bool:

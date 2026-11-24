@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 from pydantic import ValidationError
 from sqlmodel import Session, col, select
 
+from app.core.config import get_settings
+from app.core.logging import configure_logging
 from app.db.session import engine
 from app.models.common import utcnow
 from app.models.source import Source
@@ -327,10 +329,7 @@ async def _scrape(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging(get_settings().log_level)
     parser = build_parser()
     args = parser.parse_args(argv)
 

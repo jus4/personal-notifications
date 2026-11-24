@@ -1,18 +1,20 @@
 import json
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
-from app.core.config import get_settings
 from app.core.security import require_ws_api_key
 from app.db.session import SessionFactory, SessionFactoryDep
 from app.models.user import User
 from app.services.connections import manager
-from app.services.jobs import JobRepository, serialize_job
+from app.services.jobs import JobRepository
+from app.services.notification_scheduler import (
+    notify_lock,
+    send_unread_jobs_for_user,
+)
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 router = APIRouter(tags=["websocket"])
 
@@ -28,28 +30,32 @@ async def websocket_endpoint(
         if session.get(User, user_id) is None:
             await websocket.close(code=1008)
             return
-        repository = JobRepository(session)
-        jobs = repository.list_unread_jobs_for_user(
-            user_id,
-            resend_after_seconds=settings.job_reshow_after_seconds,
-            posted_within_days=(
-                settings.job_recency_days
-                if repository.has_shown_history(user_id)
-                else None
-            ),
+
+    async with notify_lock():
+        await manager.connect(user_id, websocket)
+        logger.info("User #%s connected", user_id)
+        await manager.send_json_msg(
+            websocket,
+            manager.create_response({"user_id": user_id}),
         )
-        payloads = [serialize_job(job) for job in jobs]
-        job_ids = [job.id for job in jobs if job.id is not None]
 
-    await manager.connect(user_id, websocket)
-    logger.info("User #%s connected", user_id)
-    await manager.send_json_msg(
-        websocket,
-        manager.create_response({"user_id": user_id}),
-    )
+        with session_factory() as session:
 
-    if payloads:
-        await _send_jobs(websocket, user_id, payloads, job_ids, session_factory)
+            async def send(payload: dict[str, Any]) -> bool:
+                try:
+                    await manager.send_json_msg(websocket, payload)
+                except RuntimeError:
+                    manager.disconnect(user_id, websocket)
+                    return False
+                return True
+
+            await send_unread_jobs_for_user(
+                session,
+                user_id,
+                send=send,
+                send_empty=False,
+            )
+            session.commit()
 
     try:
         while True:
@@ -58,27 +64,6 @@ async def websocket_endpoint(
     except WebSocketDisconnect:
         manager.disconnect(user_id, websocket)
         logger.info("User #%s disconnected", user_id)
-
-
-async def _send_jobs(
-    websocket: WebSocket,
-    user_id: int,
-    payloads: list[dict],
-    job_ids: list[int],
-    session_factory: SessionFactory,
-) -> None:
-    try:
-        await manager.send_json_msg(
-            websocket,
-            {"type": "new_jobs", "status": "success", "data": {"jobs": payloads}},
-        )
-    except RuntimeError:
-        manager.disconnect(user_id, websocket)
-        return
-
-    with session_factory() as session:
-        JobRepository(session).mark_jobs_sent(user_id, job_ids)
-        session.commit()
 
 
 async def _handle_client_message(

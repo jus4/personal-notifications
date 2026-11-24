@@ -67,7 +67,9 @@ uv run alembic upgrade head
 | `DATABASE_URL` | required | PostgreSQL SQLAlchemy database URL |
 | `TEST_DATABASE_URL` | required for tests | PostgreSQL database URL used by the test suite |
 | `ENVIRONMENT` | `development` | Environment name |
+| `LOG_LEVEL` | `INFO` | Application log level (`DEBUG`, `INFO`, `WARNING`, ...) |
 | `SQL_ECHO` | `false` | Log SQL statements when enabled |
+| `DB_CONNECT_TIMEOUT_SECONDS` | `5` | PostgreSQL connect timeout used for the startup check |
 | `APP_PASSWORD` | empty | Login password; also used as the external API key |
 | `SESSION_SECRET` | `dev-insecure-change-me` | Secret used to sign session cookies |
 | `SESSION_COOKIE_NAME` | `notification_session` | Name of the session cookie |
@@ -82,6 +84,15 @@ uv run alembic upgrade head
 | `SCRAPE_ACTIVE_START_HOUR` | `6` | First hour of the scheduler's active window in `Europe/Helsinki` |
 | `SCRAPE_ACTIVE_END_HOUR` | `21` | Last hour of the scheduler's active window in `Europe/Helsinki` |
 | `PRODUCT_SCRAPE_INTERVAL_SECONDS` | `86400` | Minimum age before a product offer is scraped again; `0` disables the product scheduler |
+| `NOTIFICATION_INTERVAL_SECONDS` | `3600` | How often connected websocket clients are reminded about unread jobs; `0` disables the reminder task |
+| `JOB_RESHOW_AFTER_SECONDS` | `1800` | Minimum time before an unread job can be sent to the same user again |
+| `JOB_RECENCY_DAYS` | `30` | After a user has acknowledged a job, only jobs posted within this many days are notified |
+| `REDIS_URL` | empty | Optional Redis URL for the distributed scrape lock; empty uses the in-process lock |
+| `REDIS_KEY_PREFIX` | `notification` | Prefix for Redis lock keys |
+| `REDIS_SOCKET_TIMEOUT_SECONDS` | `2` | Socket timeout for Redis operations |
+| `SCRAPE_LOCK_TTL_SECONDS` | `60` | Redis scrape lock TTL; renewed while a scrape is running |
+| `SCRAPE_LOCK_RENEW_INTERVAL_SECONDS` | `TTL / 3` | How often to renew the Redis scrape lock |
+| `SCRAPE_LOCK_WAIT_TIMEOUT_SECONDS` | empty | Max seconds manual scrapes wait for the lock; empty waits indefinitely |
 
 `APP_PASSWORD` is required when `ENVIRONMENT=production`, and `SESSION_SECRET`
 must be changed from its development default.
@@ -105,6 +116,12 @@ Health endpoints:
 
 - `GET /health`
 - `GET /health/db`
+- `GET /health/redis` (`disabled` when `REDIS_URL` is unset)
+
+On startup the app checks the database connection and that `alembic_version`
+exists. If the database is unreachable or not migrated, startup aborts with an
+error log instead of serving requests. Application logs go to stderr and honor
+`LOG_LEVEL`.
 
 
 ## Manage sources
@@ -163,10 +180,18 @@ It uses the `Europe/Helsinki` timezone and does not poll while waiting:
 - No scheduler queries run during the night.
 - If the process starts inside the active window, it runs one catch-up scrape
   and then continues with the normal slots.
+- While at least one websocket client is connected, unread jobs are also
+  re-sent every `NOTIFICATION_INTERVAL_SECONDS`. The reminder task opens no
+  database connection when nobody is connected, and it stops once the client
+  acknowledges jobs with `jobs_shown`.
 
 Job and product scrapes share a lock, so scheduled runs skip and manual runs
-wait when another scrape is active. Keep the API at one instance so the lock
-remains effective.
+wait when another scrape is active. When `REDIS_URL` is set, the lock is stored
+in Redis with a renewed TTL, so overlapping instances (for example during a
+rolling deployment) cannot scrape concurrently. If Redis is unreachable, the
+lock falls back to the in-process lock and scraping continues on a single
+instance. Keep the API at one instance unless the scheduler is moved out of the
+app process.
 
 The cron example below is an alternative for deployments that want to schedule
 scraping outside the app. Do not run both cron and the in-process scheduler.
