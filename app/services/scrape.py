@@ -70,6 +70,8 @@ async def run_enabled_sources(
         ).all()
     )
 
+    logger.info("Starting job scrape: sources=%s", len(sources))
+
     batch = ScrapeBatchResult(source_count=len(sources))
     for source in sources:
         slug = source.slug
@@ -77,9 +79,25 @@ async def run_enabled_sources(
             result = await run_source(session, source)
             batch.results.append(result)
             batch.inserted_ids.extend(result.inserted_ids)
+            logger.info(
+                "Scraped jobs %s: fetched=%s inserted=%s updated=%s "
+                "skipped=%s failed=%s",
+                result.source,
+                result.fetched,
+                result.inserted,
+                result.updated,
+                result.skipped,
+                result.failed,
+            )
         except Exception as exc:
             session.rollback()
             logger.exception("Scrape failed for %s", slug)
             batch.failures.append(ScrapeFailure(source=slug, error=str(exc)))
 
+    logger.info(
+        "Job scrape finished: sources=%s inserted=%s failures=%s",
+        batch.source_count,
+        len(batch.inserted_ids),
+        len(batch.failures),
+    )
     return batch

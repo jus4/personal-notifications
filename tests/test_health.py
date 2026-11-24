@@ -13,3 +13,10 @@ def test_health_db(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_health_redis_disabled(client: TestClient) -> None:
+    response = client.get("/health/redis")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "disabled"}

@@ -144,6 +144,7 @@ async def _scrape_links(
             )
             session.commit()
             result.updated += 1
+            logger.debug("Scraped product %s from %s", scraped.title, link_url)
         except Exception as exc:
             session.rollback()
             logger.exception("Product scrape failed for %s", link_url)
@@ -181,6 +182,13 @@ async def run_product_source(
     )
     result = ProductScrapeResult(source=source.slug, links=len(links))
     await _scrape_links(session, repository, adapter, source, links, result)
+    logger.info(
+        "Scraped product source %s: links=%s updated=%s failed=%s",
+        result.source,
+        result.links,
+        result.updated,
+        result.failed,
+    )
     return result
 
 
@@ -205,6 +213,12 @@ async def run_product_offers(
     grouped: dict[int, list[ProductSource]] = {}
     for link in links:
         grouped.setdefault(link.source_id, []).append(link)
+
+    logger.info(
+        "Starting product offer scrape: product_id=%s sources=%s",
+        product.id,
+        len(grouped),
+    )
 
     batch = ProductScrapeBatchResult(source_count=len(grouped))
     for source_id, source_links in grouped.items():
@@ -236,7 +250,21 @@ async def run_product_offers(
             result,
         )
         batch.results.append(result)
+        logger.info(
+            "Scraped product source %s: links=%s updated=%s failed=%s",
+            result.source,
+            result.links,
+            result.updated,
+            result.failed,
+        )
 
+    logger.info(
+        "Product offer scrape finished: product_id=%s sources=%s updated=%s failed=%s",
+        product.id,
+        len(grouped),
+        sum(result.updated for result in batch.results),
+        sum(result.failed for result in batch.results),
+    )
     return batch
 
 
@@ -260,6 +288,8 @@ async def run_product_scrape(
         statement = statement.where(col(Source.slug) == source_slug)
     sources = list(session.exec(statement.order_by(col(Source.slug))).all())
 
+    logger.info("Starting product scrape: sources=%s", len(sources))
+
     batch = ProductScrapeBatchResult(source_count=len(sources))
     for source in sources:
         slug = source.slug
@@ -276,4 +306,9 @@ async def run_product_scrape(
             logger.exception("Product scrape failed for %s", slug)
             batch.failures.append(ProductScrapeFailure(source=slug, error=str(exc)))
 
+    logger.info(
+        "Product scrape finished: sources=%s failures=%s",
+        batch.source_count,
+        len(batch.failures),
+    )
     return batch

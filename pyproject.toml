@@ -14,12 +14,14 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "pydantic-settings>=2.4",
     "python-multipart>=0.0.33",
+    "redis[hiredis]>=5,<8",  # fakeredis 2.40 is incompatible with redis>=8
     "sqlmodel>=0.0.22",
     "uvicorn[standard]>=0.30",
 ]
 
 [dependency-groups]
 dev = [
+    "fakeredis[lua]>=2",
     "pytest>=8.0",
     "ruff>=0.6",
 ]

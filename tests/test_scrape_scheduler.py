@@ -244,20 +244,22 @@ def test_run_due_skips_when_scrape_lock_is_held(
     async def fake_products(settings: Settings) -> None:
         calls.append("products")
 
+    class HeldLock:
+        async def try_acquire(self) -> bool:
+            return False
+
+        async def release(self) -> None:
+            raise AssertionError("release should not be called when lock is held")
+
     async def scenario() -> None:
-        lock = asyncio.Lock()
-        await lock.acquire()
-        monkeypatch.setattr(scrape_scheduler, "scrape_lock", lock)
+        monkeypatch.setattr(scrape_scheduler, "scrape_lock", HeldLock())
         monkeypatch.setattr(scrape_scheduler, "_run_jobs", fake_jobs)
         monkeypatch.setattr(scrape_scheduler, "_run_products", fake_products)
-        try:
-            await scrape_scheduler._run_due(
-                _settings(),
-                jobs=True,
-                products=True,
-            )
-        finally:
-            lock.release()
+        await scrape_scheduler._run_due(
+            _settings(),
+            jobs=True,
+            products=True,
+        )
 
     asyncio.run(scenario())
 

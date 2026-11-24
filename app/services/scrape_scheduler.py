@@ -102,23 +102,17 @@ def in_active_window(now: datetime, settings: Settings) -> bool:
 async def _run_jobs() -> None:
     with Session(engine) as session:
         try:
-            batch = await scrape_and_notify(session)
+            await scrape_and_notify(session)
         except Exception:
             session.rollback()
             logger.exception("Scheduled job scrape failed")
             return
 
-    logger.info(
-        "Scheduled job scrape finished: sources=%s failures=%s",
-        batch.source_count,
-        len(batch.failures),
-    )
-
 
 async def _run_products(settings: Settings) -> None:
     with Session(engine) as session:
         try:
-            batch = await run_product_scrape(
+            await run_product_scrape(
                 session,
                 interval_seconds=settings.product_scrape_interval_seconds,
             )
@@ -127,25 +121,21 @@ async def _run_products(settings: Settings) -> None:
             logger.exception("Scheduled product scrape failed")
             return
 
-    logger.info(
-        "Scheduled product scrape finished: sources=%s failures=%s",
-        batch.source_count,
-        len(batch.failures),
-    )
-
 
 async def _run_due(settings: Settings, *, jobs: bool, products: bool) -> None:
     if not jobs and not products:
         return
-    if scrape_lock.locked():
+    if not await scrape_lock.try_acquire():
         logger.info("Skipping scheduled scrape: another scrape is running")
         return
 
-    async with scrape_lock:
+    try:
         if jobs:
             await _run_jobs()
         if products:
             await _run_products(settings)
+    finally:
+        await scrape_lock.release()
 
 
 async def run_scrape_scheduler(settings: Settings | None = None) -> None:

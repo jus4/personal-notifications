@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import datetime
 from decimal import Decimal
 
@@ -55,6 +56,7 @@ def _link(
 def test_run_product_source_updates_scraped_link(
     monkeypatch: pytest.MonkeyPatch,
     session: Session,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     source = _source(session)
     link = _link(session, source)
@@ -77,8 +79,10 @@ def test_run_product_source_updates_scraped_link(
 
     monkeypatch.setitem(PRODUCT_ADAPTERS, FakeAdapter.key, FakeAdapter)
 
-    result = asyncio.run(run_product_source(session, source, force=True))
+    with caplog.at_level(logging.INFO, logger="app.services.product_scrape"):
+        result = asyncio.run(run_product_source(session, source, force=True))
 
+    assert "Scraped product source bergfreunde" in caplog.text
     assert result.links == 1
     assert result.updated == 1
     assert result.failed == 0
@@ -94,6 +98,7 @@ def test_run_product_source_updates_scraped_link(
 def test_run_product_scrape_skips_fresh_links_unless_forced(
     monkeypatch: pytest.MonkeyPatch,
     session: Session,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     source = _source(session)
     _link(
@@ -117,7 +122,11 @@ def test_run_product_scrape_skips_fresh_links_unless_forced(
     assert skipped.results[0].links == 0
     assert calls == 0
 
-    forced = asyncio.run(run_product_scrape(session, force=True))
+    with caplog.at_level(logging.INFO, logger="app.services.product_scrape"):
+        forced = asyncio.run(run_product_scrape(session, force=True))
+
+    assert "Starting product scrape: sources=1" in caplog.text
+    assert "Product scrape finished: sources=1 failures=0" in caplog.text
     assert forced.results[0].links == 1
     assert calls == 1
 
@@ -165,6 +174,7 @@ def test_run_product_scrape_reports_missing_adapter(session: Session) -> None:
 def test_run_product_offers_updates_only_target_product(
     monkeypatch: pytest.MonkeyPatch,
     session: Session,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     source = _source(session)
     repository = ProductRepository(session)
@@ -200,8 +210,11 @@ def test_run_product_offers_updates_only_target_product(
 
     monkeypatch.setitem(PRODUCT_ADAPTERS, FakeAdapter.key, FakeAdapter)
 
-    batch = asyncio.run(run_product_offers(session, target, force=True))
+    with caplog.at_level(logging.INFO, logger="app.services.product_scrape"):
+        batch = asyncio.run(run_product_offers(session, target, force=True))
 
+    assert f"Starting product offer scrape: product_id={target.id}" in caplog.text
+    assert f"Product offer scrape finished: product_id={target.id}" in caplog.text
     assert batch.source_count == 1
     assert len(batch.results) == 1
     result = batch.results[0]

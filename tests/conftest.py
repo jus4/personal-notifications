@@ -10,8 +10,18 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_session, get_session_factory
 from app.main import app
 from app.models.user import User
+from app.services.scrape_lock import scrape_lock
 
 PASSWORD = "test-password"
+
+
+@pytest.fixture(autouse=True)
+def _disable_external_startup_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scrape_lock, "_redis", None)
+    monkeypatch.setattr("app.core.redis.redis_client", None)
+    monkeypatch.setattr("app.main.redis_client", None)
+    monkeypatch.setattr("app.api.routes.health.redis_client", None)
+    monkeypatch.setattr("app.main.check_database_ready", lambda: None)
 
 
 def _test_database_url() -> str:
@@ -73,6 +83,7 @@ def client(
     settings = get_settings()
     monkeypatch.setattr(settings, "scrape_interval_seconds", 0)
     monkeypatch.setattr(settings, "product_scrape_interval_seconds", 0)
+    monkeypatch.setattr(settings, "notification_interval_seconds", 0)
 
     app.dependency_overrides[get_session] = override_get_session
     app.dependency_overrides[get_session_factory] = override_get_session_factory
